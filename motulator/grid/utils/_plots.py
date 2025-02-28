@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from cycler import cycler
 
 from motulator.common.utils import complex2abc
+from motulator.grid import model
 
 # Plotting parameters
 plt.rcParams["axes.prop_cycle"] = cycler(color="brgcmyk")
@@ -238,6 +239,22 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
             np.abs(mdl.ac_source.data.e_gs/base.u),
             "k--",
             label=r"$e_\mathrm{g}$")
+
+    elif isinstance(mdl, model.GridConverterIdentification):
+        # Subplot 3: Synchronous frame grid voltage
+        e_g = np.conj(mdl.ac_source.data.exp_j_theta_g)*mdl.ac_source.data.e_gs
+
+        ax3.plot(
+            mdl.ac_source.data.t,
+            np.real(e_g/base.u),
+            label=r"$e_\mathrm{gd}$",
+            ds="steps-post")
+        ax3.plot(
+            mdl.ac_source.data.t,
+            np.imag(e_g/base.u),
+            label=r"$e_\mathrm{gq}$",
+            ds="steps-post")
+
     else:
         # Subplot 3: Converter voltage reference and grid voltage magnitude
         ax3.plot(
@@ -255,6 +272,7 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
             np.abs(mdl.ac_source.data.e_gs)/base.u,
             "k--",
             label=r"$e_\mathrm{g}$")
+
     ax3.legend()
     ax3.set_xlim(t_span)
 
@@ -276,6 +294,7 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
     plt.show()
 
 
+# %%
 def plot_voltage_vector(sim, base=None):
     """
     Plot locus of the grid voltage vector.
@@ -318,6 +337,27 @@ def plot_voltage_vector(sim, base=None):
         ax.set_ylabel("Imaginary (V)")
     ax.legend()
     ax.set_aspect("equal")
+
+
+# %%
+def plot_identification(data):
+    """
+    Plot elements of the identified converter output admittance matrix
+
+    Parameters
+    ----------
+    data : SimpleNamespace
+        Contains the elements of the output admittance matrix and corresponding
+        frequencies.
+
+    """
+
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(2, 2, figsize=(10, 7))
+
+    ax1.plot(data.freq, np.real(data.Y_dd))
+    ax2.plot(data.freq, np.real(data.Y_qd))
+    ax3.plot(data.freq, np.real(data.Y_dq))
+    ax4.plot(data.freq, np.real(data.Y_qq))
 
 
 # %%
