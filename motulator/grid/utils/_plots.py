@@ -354,10 +354,10 @@ def plot_identification(data):
 
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(2, 2, figsize=(10, 7))
 
-    ax1.plot(data.freq, np.real(data.Y_dd))
-    ax2.plot(data.freq, np.real(data.Y_qd))
-    ax3.plot(data.freq, np.real(data.Y_dq))
-    ax4.plot(data.freq, np.real(data.Y_qq))
+    ax1.plot(data.f_e, np.real(data.Y_dd))
+    ax2.plot(data.f_e, np.real(data.Y_qd))
+    ax3.plot(data.f_e, np.real(data.Y_dq))
+    ax4.plot(data.f_e, np.real(data.Y_qq))
 
 
 # %%

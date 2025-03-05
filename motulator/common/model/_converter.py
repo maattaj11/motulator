@@ -91,6 +91,8 @@ class VoltageSourceConverter(Subsystem):
                 self.data.u_dc = self.u_dc(self.data.t)
             else:
                 self.data.u_dc = np.full(np.size(self.data.t), self.u_dc)
+        # error: q_cs and u_dc have different sizes, q_cs has data from initial
+        # simulation while u_dc does not
         data.u_cs = data.q_cs*data.u_dc
 
     def post_process_with_inputs(self):

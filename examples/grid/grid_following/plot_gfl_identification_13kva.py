@@ -51,14 +51,14 @@ ctrl = control.GridFollowingControl(cfg)
 # Configure and run the identification
 identification_cfg = AdmittanceIdentificationCfg(
     op_point=SimpleNamespace(p_g=base.p, q_g=0),
-    abs_u_e=.01*base.u,
-    f_start=.1,
+    abs_u_e=.1*base.u,
+    f_start=1,
     f_stop=1/(2*cfg.T_s),
     n_freqs=10)
 
 identification = AdmittanceIdentification(identification_cfg, mdl, ctrl)
-data = identification.run()
+data = identification.run(multiprocess=False)
 
 # %%
 # Plot the identification results
-plot_identification(data)
+#plot_identification(data)

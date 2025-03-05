@@ -203,7 +203,7 @@ class Simulation:
         self.mdl = mdl
         self.ctrl = ctrl
 
-    def simulate(self, t_stop=1, max_step=np.inf):
+    def simulate(self, t_stop=1, max_step=np.inf, T_eval=None):
         """
         Solve the continuous-time system model and call the control system.
 
@@ -213,7 +213,9 @@ class Simulation:
             Simulation stop time. The default is 1.
         max_step : float, optional
             Max step size of the solver. The default is inf.
-
+        T_eval : float, optional
+            Sampling period for the solver. Specify this parameter to obtain
+            the solution at fixed time steps. The default is None.
         Notes
         -----
         Other options of `solve_ivp` could be easily used if needed, but, for
@@ -221,7 +223,7 @@ class Simulation:
 
         """
         try:
-            self._simulation_loop(t_stop, max_step)
+            self._simulation_loop(t_stop, max_step, T_eval)
         except FloatingPointError:
             print(f"Invalid value encountered at {self.mdl.t0:.2f} seconds.")
         # Post-process the solution data
@@ -229,7 +231,7 @@ class Simulation:
         self.ctrl.post_process()
 
     @np.errstate(invalid="raise")
-    def _simulation_loop(self, t_stop, max_step):
+    def _simulation_loop(self, t_stop, max_step, T_eval):
         """Run the main simulation loop."""
         while self.mdl.t0 <= t_stop:
 
@@ -252,10 +254,26 @@ class Simulation:
                     # Get initial values
                     state0 = self.mdl.get_initial_values()
 
-                    # Integrate over t_span
+                    # Set the integration time span
                     t_span = (self.mdl.t0, self.mdl.t0 + t_step)
+
+                    # Create array of evaluation times if T_eval is specified
+                    if T_eval is not None:
+                        t_eval = np.linspace(
+                            t_span[0],
+                            t_span[1],
+                            num=int(t_step/T_eval),
+                            endpoint=False)
+                    else:
+                        t_eval = None
+
+                    # Integrate over t_span
                     sol = solve_ivp(
-                        self.mdl.rhs, t_span, state0, max_step=max_step)
+                        self.mdl.rhs,
+                        t_span,
+                        state0,
+                        max_step=max_step,
+                        t_eval=t_eval)
 
                     # Set the new initial time
                     self.mdl.t0 = t_span[-1]
