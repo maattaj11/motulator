@@ -351,13 +351,22 @@ def plot_identification(data):
         frequencies.
 
     """
+    # plt.rcParams.update({"text.usetex": True})
 
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(2, 2, figsize=(10, 7))
+    _, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 7))
 
-    ax1.plot(data.f_e, np.real(data.Y_dd))
-    ax2.plot(data.f_e, np.real(data.Y_qd))
-    ax3.plot(data.f_e, np.real(data.Y_dq))
-    ax4.plot(data.f_e, np.real(data.Y_qq))
+    ax1.semilogx(data.f_e, np.real(data.Y_dd))
+    ax2.semilogx(data.f_e, np.real(data.Y_dq))
+    ax3.semilogx(data.f_e, np.real(data.Y_qd))
+    ax4.semilogx(data.f_e, np.real(data.Y_qq))
+
+    ax1.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dd}\}\ (\Omega^{-1})$")
+    ax2.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dq}\}\ (\Omega^{-1})$")
+    ax3.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qd}\}\ (\Omega^{-1})$")
+    ax4.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
+
+    plt.tight_layout()
+    plt.show()
 
 
 # %%
