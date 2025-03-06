@@ -7,10 +7,51 @@ from time import time
 from types import SimpleNamespace
 
 import numpy as np
-import matplotlib.pyplot as plt
 
-from motulator.grid import model
-from motulator.grid.utils import ACFilterPars, plot
+from motulator.grid import model, control
+from motulator.grid.utils import (
+    ACFilterPars, BaseValues, NominalValues, plot_identification)
+
+# %%
+
+
+def setup_identification():
+    # Compute base values based on the nominal values.
+
+    nom = NominalValues(U=400, I=18, f=50, P=12.5e3)
+    base = BaseValues.from_nominal(nom)
+
+    # Configure the system model.
+
+    # Filter and grid
+    par = ACFilterPars(L_fc=.15*base.L)
+    ac_filter = model.LFilter(par)
+    ac_source = model.SignalInjection(w_g=base.w, abs_e_g=base.u)
+    # Inverter with constant DC voltage
+    converter = model.VoltageSourceConverter(u_dc=650)
+
+    # Create system model
+    mdl = model.GridConverterIdentification(
+        converter, ac_filter, ac_source, delay=0)
+    # mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
+
+    # Configure the control system.
+    cfg = control.GridFollowingControlCfg(
+        L=.2*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=.0001)
+    ctrl = control.GridFollowingControl(cfg)
+
+    # Configure and run the identification
+    identification_cfg = AdmittanceIdentificationCfg(
+        op_point=SimpleNamespace(p_g=.4*base.p, q_g=0),
+        abs_u_e=.01*base.u,
+        f_start=10,
+        f_stop=4e3,  # Nyquist freq: 1/(2*cfg.T_s)
+        n_freqs=10,
+        multiprocess=True,
+        spacing="log",
+        plot_style="bode")
+
+    return identification_cfg, mdl, ctrl
 
 
 # %%
@@ -48,6 +89,13 @@ class AdmittanceIdentificationCfg:
     n_periods : int, optional
         Number of excitation signal periods to use for calculating the DFT. The
         default is 10.
+    multiprocess : bool, optional
+        If set to True, multiprocessing.Pool() is used to run the
+        identification using parallel threads. The default is True.
+    plot_style : str, optional
+        Set this variable to plot either the real and imaginary parts of the
+        admittance ("re_im") or the magnitude and phase ("bode"). The default
+        is "re_im".
 
     """
 
@@ -62,6 +110,8 @@ class AdmittanceIdentificationCfg:
     t1: float = .02
     T_eval: float = 1e-5
     n_periods: int = 10
+    multiprocess: bool = True
+    plot_style: str = "re_im"
 
     def __post_init__(self):
         if self.freqs is None:
@@ -74,176 +124,173 @@ class AdmittanceIdentificationCfg:
 
 
 # %%
-class AdmittanceIdentification:
+
+
+def custom_error_callback(error):
+    print(f'Got error: {error}')
+
+
+def dft(cfg, u, f_e):
     """
-    Admittance identification.
+    Single-frequency discrete Fourier transform.
 
+    Calculates the frequency component y at frequency f_e from input
+    signal u, using the discrete Fourier transform algorithm.
+    
     """
 
-    def __init__(self, cfg, mdl, ctrl):
-        self.cfg = cfg
-        self.mdl = mdl
-        self.ctrl = ctrl
-        self.result = []
-        self.data = SimpleNamespace()
+    n = int(cfg.n_periods/(f_e*cfg.T_eval))
+    u = u[-n:]
+    y = 2/n*np.sum(u*np.exp(-2j*np.pi*f_e*cfg.T_eval*np.arange(n)))
+    return y
 
-    # create multiprocess task
 
-    # FFT
+def copy_state(sim):
+    """Make a copy of the simulation state."""
+    # Copy the subsystems
+    ac_filter = copy.deepcopy(sim.mdl.ac_filter)
+    converter = copy.deepcopy(sim.mdl.converter)
+    ac_source = copy.deepcopy(sim.mdl.ac_source)
+    converter.sol_q_cs = []
+    mdl = model.GridConverterIdentification(
+        converter, ac_filter, ac_source, delay=1)
+    for subsystem in mdl.subsystems:
+        if hasattr(subsystem, "sol_states"):
+            for attr in vars(subsystem.sol_states):
+                subsystem.sol_states.__dict__[attr] = []
+    mdl.sol_t = []
+    mdl.t0 = sim.mdl.sol_t[-1]
+    ctrl = copy.deepcopy(sim.ctrl)
+    return mdl, ctrl
 
-    # plot admittance
 
-    # (optional) plot time domain signals
+def pre_process(cfg, mdl, ctrl):
+    """Simulate the system to the desired operating point."""
+    ctrl.ref.p_g = cfg.op_point.p_g
+    if hasattr(cfg.op_point, "q_g"):
+        ctrl.ref.q_g = cfg.op_point.q_g
+    if hasattr(cfg.op_point, "v_c"):
+        ctrl.ref.v_c = cfg.op_point.v_c
+    sim = model.Simulation(mdl, ctrl)
+    sim.simulate(t_stop=cfg.t0)
+    return sim
 
-    def collect_result(self, result):
-        self.result.append(result)
 
-    def custom_error_callback(self, error):
-        print(f'Got error: {error}')
+def identify(cfg, sim_op, i, f_e):
+    """Calculate the output admittance at a single frequency."""
 
-    def dft(self, u, f_e):
-        """
-        Single-frequency discrete Fourier transform.
+    # 1) d-axis injection
+    mdl, ctrl = copy_state(sim_op)
+    mdl.ac_source.par.f_e = f_e
+    mdl.ac_source.par.abs_u_ed = cfg.abs_u_e
+    # Set new stop time and simulate
+    t_stop = cfg.t0 + cfg.t1 + cfg.n_periods/f_e
+    sim = model.Simulation(mdl, ctrl)
+    sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
 
-        Calculates the frequency component y at frequency f_e from input
-        signal u, using the discrete Fourier transform algorithm.
-        
-        """
+    # Transform the voltage and current to synchronous coordinates and
+    # calculate the DFT
+    u_g1 = np.conj(
+        sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.u_gs
+    u_gd1 = dft(cfg, u_g1.real, f_e)
+    u_gq1 = dft(cfg, u_g1.imag, f_e)
+    i_g1 = np.conj(
+        sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.i_gs
+    i_gd1 = dft(cfg, i_g1.real, f_e)
+    i_gq1 = dft(cfg, i_g1.imag, f_e)
 
-        n = int(self.cfg.n_periods/(f_e*self.cfg.T_eval))
-        u = u[-n:]
-        y = 2/n*np.sum(u*np.exp(-2j*np.pi*f_e*self.cfg.T_eval*np.arange(n)))
-        return y
+    # y = fft(u_g1.real)
+    # plt.semilogx(
+    #     fftfreq(np.size(u_g1), self.cfg.T_eval),
+    #     np.abs(y)/np.size(u_g1))
+    # plt.show()
 
-    def copy_state(self):
-        """Make a copy of the simulation state."""
-        # TODO: extend to work also with LCL filter
-        par = ACFilterPars(L_fc=self.mdl.ac_filter.par.L_f)
-        ac_filter = model.ACFilter(par)
-        ac_filter.data = copy.deepcopy(self.mdl.ac_filter.data)
-        ac_filter.inp = copy.deepcopy(self.mdl.ac_filter.inp)
-        ac_filter.out = copy.deepcopy(self.mdl.ac_filter.out)
-        ac_filter.state = copy.deepcopy(self.mdl.ac_filter.state)
+    # plot(sim)
 
-        converter = copy.deepcopy(self.mdl.converter)
-        converter.sol_q_cs = []
-        ac_source = copy.deepcopy(self.mdl.ac_source)
-        mdl = model.GridConverterIdentification(
-            converter, ac_filter, ac_source, delay=0)
-        for subsystem in mdl.subsystems:
-            if hasattr(subsystem, "sol_states"):
-                for attr in vars(subsystem.sol_states):
-                    subsystem.sol_states.__dict__[attr] = []
-        mdl.sol_t = []
-        mdl.t0 = self.mdl.sol_t[-1]
-        ctrl = copy.deepcopy(self.ctrl)
-        return mdl, ctrl
+    # 2) q-axis injection
+    mdl, ctrl = copy_state(sim_op)
+    mdl.ac_source.par.f_e = f_e
+    mdl.ac_source.par.abs_u_eq = cfg.abs_u_e
+    sim = model.Simulation(mdl, ctrl)
+    sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
 
-    def pre_process(self):
-        """Simulate the system to the desired operating point."""
-        self.ctrl.ref.p_g = lambda t: self.cfg.op_point.p_g
-        if hasattr(self.cfg.op_point, "q_g"):
-            self.ctrl.ref.q_g = lambda t: self.cfg.op_point.q_g
-        if hasattr(self.cfg.op_point, "v_c"):
-            self.ctrl.ref.v_c = lambda t: self.cfg.op_point.v_c
-        sim = model.Simulation(self.mdl, self.ctrl)
-        sim.simulate(t_stop=self.cfg.t0)
-        self.mdl, self.ctrl = sim.mdl, sim.ctrl
+    u_g2 = np.conj(
+        sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.u_gs
+    u_gd2 = dft(cfg, u_g2.real, f_e)
+    u_gq2 = dft(cfg, u_g2.imag, f_e)
+    i_g2 = np.conj(
+        sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.i_gs
+    i_gd2 = dft(cfg, i_g2.real, f_e)
+    i_gq2 = dft(cfg, i_g2.imag, f_e)
 
-    def identify(self, i, f_e):
-        """Calculate the output admittance at a single frequency."""
+    # print(
+    #     f"u_gd1: magnitude {np.abs(u_gd1)}, phase {np.angle(u_gd1)}\n" +
+    #     f"u_gq1: magnitude {np.abs(u_gq1)}, phase {np.angle(u_gq1)}\n" +
+    #     f"i_gd1: magnitude {np.abs(i_gd1)}, phase {np.angle(i_gd1)}\n" +
+    #     f"i_gq1: magnitude {np.abs(i_gq1)}, phase {np.angle(i_gq1)}\n\n" +
+    #     f"u_gd2: magnitude {np.abs(u_gd2)}, phase {np.angle(u_gd2)}\n" +
+    #     f"u_gq2: magnitude {np.abs(u_gq2)}, phase {np.angle(u_gq2)}\n" +
+    #     f"i_gd2: magnitude {np.abs(i_gd2)}, phase {np.angle(i_gd2)}\n" +
+    #     f"i_gq2: magnitude {np.abs(i_gq2)}, phase {np.angle(i_gq2)}")
+    # plot(sim)
 
-        # 1) d-axis injection
-        mdl, ctrl = self.copy_state()
-        mdl.ac_source.par.f_e = f_e
-        mdl.ac_source.par.abs_u_ed = self.cfg.abs_u_e
-        # Set new stop time and simulate
-        t_stop = self.cfg.t0 + self.cfg.t1 + self.cfg.n_periods/f_e
-        sim = model.Simulation(mdl, ctrl)
-        sim.simulate(t_stop=t_stop, T_eval=self.cfg.T_eval)
+    # Calculate the elements of the output admittance matrix
+    det_u = u_gd1*u_gq2 - u_gd2*u_gq1
+    Y_dd = (i_gd1*u_gq2 - i_gd2*u_gq1)/det_u
+    Y_qd = (i_gq1*u_gq2 - i_gq2*u_gq1)/det_u
+    Y_dq = (-i_gd1*u_gd2 + i_gd2*u_gd1)/det_u
+    Y_qq = (-i_gq1*u_gd2 + i_gq2*u_gd1)/det_u
+    return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
 
-        # Transform the voltage and current to synchronous coordinates and
-        # calculate the DFT
-        u_g1 = np.conj(
-            sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.u_gs
-        u_gd1 = self.dft(u_g1.real, f_e)
-        u_gq1 = self.dft(u_g1.imag, f_e)
-        i_g1 = np.conj(
-            sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.i_gs
-        i_gd1 = self.dft(i_g1.real, f_e)
-        i_gq1 = self.dft(i_g1.imag, f_e)
 
-        # y = fft(u_g1.real)
-        # plt.semilogx(
-        #     fftfreq(np.size(u_g1), self.cfg.T_eval),
-        #     np.abs(y)/np.size(u_g1))
-        # plt.show()
+def post_process(results):
+    """Transform the results to ndarray format."""
+    results = np.vstack(results)
+    data1 = SimpleNamespace()
+    data1.f_e = np.real(results[:, 1])
+    data1.Y_dd = results[:, 2]
+    data1.Y_qd = results[:, 3]
+    data1.Y_dq = results[:, 4]
+    data1.Y_qq = results[:, 5]
+    return data1
 
-        # plot(sim)
 
-        # 2) q-axis injection
-        mdl, ctrl = self.copy_state()
-        mdl.ac_source.par.f_e = f_e
-        mdl.ac_source.par.abs_u_eq = self.cfg.abs_u_e
-        sim = model.Simulation(mdl, ctrl)
-        sim.simulate(t_stop=t_stop, T_eval=self.cfg.T_eval)
+def run_identification():
+    """Entrypoint for running the identification."""
+    cfg, mdl, ctrl = setup_identification()
+    results = []
+    sim_op = pre_process(cfg, mdl, ctrl)
+    t_start = time()
 
-        u_g2 = np.conj(
-            sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.u_gs
-        u_gd2 = self.dft(u_g2.real, f_e)
-        u_gq2 = self.dft(u_g2.imag, f_e)
-        i_g2 = np.conj(
-            sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.i_gs
-        i_gd2 = self.dft(i_g2.real, f_e)
-        i_gq2 = self.dft(i_g2.imag, f_e)
+    def collect_result(result):
+        results.append(result)
 
-        # print(
-        #     f"u_gd1: magnitude {np.abs(u_gd1)}, phase {np.angle(u_gd1)}\n" +
-        #     f"u_gq1: magnitude {np.abs(u_gq1)}, phase {np.angle(u_gq1)}\n" +
-        #     f"i_gd1: magnitude {np.abs(i_gd1)}, phase {np.angle(i_gd1)}\n" +
-        #     f"i_gq1: magnitude {np.abs(i_gq1)}, phase {np.angle(i_gq1)}\n\n" +
-        #     f"u_gd2: magnitude {np.abs(u_gd2)}, phase {np.angle(u_gd2)}\n" +
-        #     f"u_gq2: magnitude {np.abs(u_gq2)}, phase {np.angle(u_gq2)}\n" +
-        #     f"i_gd2: magnitude {np.abs(i_gd2)}, phase {np.angle(i_gd2)}\n" +
-        #     f"i_gq2: magnitude {np.abs(i_gq2)}, phase {np.angle(i_gq2)}")
-        # plot(sim)
+    if cfg.multiprocess:
+        # Create the multiprocessing pool using all available CPUs
+        with mp.Pool(mp.cpu_count()) as pool:
+            async_results = []
+            for i, f_e in enumerate(cfg.freqs):
+                async_result = pool.apply_async(
+                    identify,
+                    args=[cfg, sim_op, i, f_e],
+                    error_callback=custom_error_callback,
+                    callback=collect_result)
+                async_results.append(async_result)
+            # Wait for all tasks to complete
+            [res.get() for res in async_results]
+        # Sort the results list along the first element (index i)
+        results.sort(key=lambda x: x[0])
+    else:
+        # Run only in single thread
+        for i, f_e in enumerate(cfg.freqs):
+            result = identify(cfg, sim_op, i=i, f_e=f_e)
+            collect_result(result)
 
-        # Calculate the elements of the output admittance matrix
-        det_u = u_gd1*u_gq2 - u_gd2*u_gq1
-        Y_dd = (i_gd1*u_gq2 - i_gd2*u_gq1)/det_u
-        Y_qd = (i_gq1*u_gq2 - i_gq2*u_gq1)/det_u
-        Y_dq = (-i_gd1*u_gd2 + i_gd2*u_gd1)/det_u
-        Y_qq = (-i_gq1*u_gd2 + i_gq2*u_gd1)/det_u
-        return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
+    print(f"Execution time: {(time() - t_start):.2f} s")
+    data = post_process(results)
+    plot_identification(data, cfg.plot_style)
 
-    def post_process(self):
-        """Transform the lists to ndarray format."""
-        result = np.vstack(self.result)
-        self.data.f_e = np.real(result[:, 1])
-        self.data.Y_dd = result[:, 2]
-        self.data.Y_qd = result[:, 3]
-        self.data.Y_dq = result[:, 4]
-        self.data.Y_qq = result[:, 5]
 
-    def main(self, multiprocess=True):
-        """Entrypoint for running the identification."""
-        self.pre_process()
-        t_start = time()
-
-        if multiprocess:
-            with mp.Pool(mp.cpu_count()) as pool:
-                for i, f_e in enumerate(self.cfg.freqs):
-                    pool.apply_async(
-                        self.identify,
-                        args=[i, f_e],
-                        error_callback=self.custom_error_callback,
-                        callback=self.collect_result)
-            self.result.sort(key=lambda x: x[0])
-        else:
-            for i, f_e in enumerate(self.cfg.freqs):
-                result = self.identify(i=i, f_e=f_e)
-                self.collect_result(result)
-
-        print(f"Execution time: {(time() - t_start):.2f} s")
-        self.post_process()
-        return self.data
+if __name__ == '__main__':
+    # Run the identification and plot results
+    run_identification()

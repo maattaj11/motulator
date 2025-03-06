@@ -340,7 +340,7 @@ def plot_voltage_vector(sim, base=None):
 
 
 # %%
-def plot_identification(data):
+def plot_identification(data, plot_style):
     """
     Plot elements of the identified converter output admittance matrix
 
@@ -349,21 +349,52 @@ def plot_identification(data):
     data : SimpleNamespace
         Contains the elements of the output admittance matrix and corresponding
         frequencies.
+    plot_style : str
+        Set this variable to plot either the real and imaginary parts of the
+        admittance ("re_im") or the magnitude and phase ("bode").
 
     """
     # plt.rcParams.update({"text.usetex": True})
 
-    _, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 7))
+    _, ((ax1, ax5), (ax2, ax6), (ax3, ax7), (ax4, ax8)) = plt.subplots(4, 2)
+    # TODO: set xlim and ylim for plots
+    if plot_style == "bode":
+        ax1.semilogx(data.f_e, np.abs(data.Y_dd))
+        ax2.semilogx(data.f_e, np.angle(data.Y_dd, deg=True))
+        ax3.semilogx(data.f_e, np.abs(data.Y_qd))
+        ax4.semilogx(data.f_e, np.angle(data.Y_qd, deg=True))
+        ax5.semilogx(data.f_e, np.abs(data.Y_dq))
+        ax6.semilogx(data.f_e, np.angle(data.Y_dq, deg=True))
+        ax7.semilogx(data.f_e, np.abs(data.Y_qq))
+        ax8.semilogx(data.f_e, np.angle(data.Y_qq, deg=True))
 
-    ax1.semilogx(data.f_e, np.real(data.Y_dd))
-    ax2.semilogx(data.f_e, np.real(data.Y_dq))
-    ax3.semilogx(data.f_e, np.real(data.Y_qd))
-    ax4.semilogx(data.f_e, np.real(data.Y_qq))
+        ax1.set_ylabel(r"$|Y_\mathrm{dd}|\ (\Omega^{-1})$")
+        ax2.set_ylabel(r"$\angle Y_\mathrm{dd}\ (\mathrm{deg})$")
+        ax3.set_ylabel(r"$|Y_\mathrm{qd}|\ (\Omega^{-1})$")
+        ax4.set_ylabel(r"$\angle Y_\mathrm{qd}\ (\mathrm{deg})$")
+        ax5.set_ylabel(r"$|Y_\mathrm{dq}|\ (\Omega^{-1})$")
+        ax6.set_ylabel(r"$\angle Y_\mathrm{dq}\ (\mathrm{deg})$")
+        ax7.set_ylabel(r"$|Y_\mathrm{qq}|\ (\Omega^{-1})$")
+        ax8.set_ylabel(r"$\angle Y_\mathrm{qq}\ (\mathrm{deg})$")
 
-    ax1.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dd}\}\ (\Omega^{-1})$")
-    ax2.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dq}\}\ (\Omega^{-1})$")
-    ax3.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qd}\}\ (\Omega^{-1})$")
-    ax4.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
+    else:
+        ax1.semilogx(data.f_e, np.real(data.Y_dd))
+        ax2.semilogx(data.f_e, np.imag(data.Y_dd))
+        ax3.semilogx(data.f_e, np.real(data.Y_qd))
+        ax4.semilogx(data.f_e, np.imag(data.Y_qd))
+        ax5.semilogx(data.f_e, np.real(data.Y_dq))
+        ax6.semilogx(data.f_e, np.imag(data.Y_dq))
+        ax7.semilogx(data.f_e, np.real(data.Y_qq))
+        ax8.semilogx(data.f_e, np.imag(data.Y_qq))
+
+        ax1.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dd}\}\ (\Omega^{-1})$")
+        ax2.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{dd}\}\ (\Omega^{-1})$")
+        ax3.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qd}\}\ (\Omega^{-1})$")
+        ax4.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{qd}\}\ (\Omega^{-1})$")
+        ax5.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dq}\}\ (\Omega^{-1})$")
+        ax6.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{dq}\}\ (\Omega^{-1})$")
+        ax7.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
+        ax8.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
 
     plt.tight_layout()
     plt.show()

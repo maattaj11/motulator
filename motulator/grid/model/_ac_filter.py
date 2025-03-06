@@ -13,46 +13,7 @@ from motulator.common.utils import complex2abc
 
 
 # %%
-class ACFilter(Subsystem):
-    """
-    Base class for AC-side filters.
-
-    This provides a base class and wrapper for converter AC-side filters
-    (`LFilter`, `LCLFilter`) and grid impedance. Calling this class returns the
-    corresponding filter object depending on if a value for the filter
-    capacitance `C_f` is given.
-
-    Parameters
-    ----------
-    par : ACFilterPars
-        Filter model parameters.
-
-    """
-
-    def __new__(cls, par):
-        if par.C_f > 0:
-            if par.L_fg > 0:
-                return super().__new__(LCLFilter)
-            raise ValueError("L_fg must be specified for the LCL filter.")
-        return super().__new__(LFilter)
-
-    def meas_currents(self):
-        """
-        Measure the converter phase currents.
-
-        Returns
-        -------
-        i_c_abc : 3-tuple of floats
-            Converter phase currents (A).
-
-        """
-        i_c_abc = complex2abc(self.state.i_cs)
-
-        return i_c_abc
-
-
-# %%
-class LFilter(ACFilter):
+class LFilter(Subsystem):
     """
     Model of an L filter and an inductive-resistive grid.
 
@@ -103,6 +64,20 @@ class LFilter(ACFilter):
         d_i_cs = (inp.u_cs - inp.e_gs - R_t*state.i_cs)/L_t
         return [d_i_cs]
 
+    def meas_currents(self):
+        """
+        Measure the converter phase currents.
+
+        Returns
+        -------
+        i_c_abc : 3-tuple of floats
+            Converter phase currents (A).
+
+        """
+        i_c_abc = complex2abc(self.state.i_cs)
+
+        return i_c_abc
+
     def meas_pcc_voltages(self):
         """
         Measure the phase voltages at the point of common coupling (PCC).
@@ -133,7 +108,7 @@ class LFilter(ACFilter):
 
 
 # %%
-class LCLFilter(ACFilter):
+class LCLFilter(Subsystem):
     """
     Model of an LCL filter and an inductive-resistive grid.
 
@@ -183,6 +158,20 @@ class LCLFilter(ACFilter):
         d_u_fs = (state.i_cs - state.i_gs)/par.C_f
         d_i_gs = (state.u_fs - inp.e_gs - R_t*state.i_gs)/L_t
         return [d_i_cs, d_u_fs, d_i_gs]
+
+    def meas_currents(self):
+        """
+        Measure the converter phase currents.
+
+        Returns
+        -------
+        i_c_abc : 3-tuple of floats
+            Converter phase currents (A).
+
+        """
+        i_c_abc = complex2abc(self.state.i_cs)
+
+        return i_c_abc
 
     def meas_pcc_voltages(self):
         """

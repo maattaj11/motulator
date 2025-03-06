@@ -16,49 +16,49 @@ from types import SimpleNamespace
 
 from motulator.grid import model, control
 from motulator.grid.utils import (
-    AdmittanceIdentification, AdmittanceIdentificationCfg, BaseValues,
-    ACFilterPars, NominalValues, plot, plot_identification)
+    AdmittanceIdentificationCfg, BaseValues, ACFilterPars, NominalValues,
+    plot_identification, run_identification)
 # from motulator.grid.utils import plot_voltage_vector
 
-# %%
-# Compute base values based on the nominal values.
 
-nom = NominalValues(U=400, I=18, f=50, P=12.5e3)
-base = BaseValues.from_nominal(nom)
+def main():
+    # Compute base values based on the nominal values.
 
-# %%
-# Configure the system model.
+    nom = NominalValues(U=400, I=18, f=50, P=12.5e3)
+    base = BaseValues.from_nominal(nom)
 
-# Filter and grid
-par = ACFilterPars(L_fc=.15*base.L)
-ac_filter = model.ACFilter(par)
-ac_source = model.SignalInjection(w_g=base.w, abs_e_g=base.u)
-# Inverter with constant DC voltage
-converter = model.VoltageSourceConverter(u_dc=650)
+    # Configure the system model.
 
-# Create system model
-mdl = model.GridConverterIdentification(
-    converter, ac_filter, ac_source, delay=0)
-# mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
+    # Filter and grid
+    par = ACFilterPars(L_fc=.15*base.L)
+    ac_filter = model.ACFilter(par)
+    ac_source = model.SignalInjection(w_g=base.w, abs_e_g=base.u)
+    # Inverter with constant DC voltage
+    converter = model.VoltageSourceConverter(u_dc=650)
 
-# %%
-# Configure the control system.
-cfg = control.GridFollowingControlCfg(
-    L=.2*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=.0001)
-ctrl = control.GridFollowingControl(cfg)
+    # Create system model
+    mdl = model.GridConverterIdentification(
+        converter, ac_filter, ac_source, delay=0)
+    # mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
 
-# %%
-# Configure and run the identification
-identification_cfg = AdmittanceIdentificationCfg(
-    op_point=SimpleNamespace(p_g=base.p, q_g=0),
-    abs_u_e=.01*base.u,
-    f_start=10,
-    f_stop=1/(2*cfg.T_s),
-    n_freqs=20)
+    # Configure the control system.
+    cfg = control.GridFollowingControlCfg(
+        L=.2*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=.0001)
+    ctrl = control.GridFollowingControl(cfg)
 
-identification = AdmittanceIdentification(identification_cfg, mdl, ctrl)
-data = identification.main(multiprocess=False)
+    # Configure and run the identification
+    identification_cfg = AdmittanceIdentificationCfg(
+        op_point=SimpleNamespace(p_g=base.p, q_g=0),
+        abs_u_e=.01*base.u,
+        f_start=10,
+        f_stop=1/(2*cfg.T_s),
+        n_freqs=20)
 
-# %%
-# Plot the identification results
-plot_identification(data)
+    data = run_identification(identification_cfg, mdl, ctrl, multiprocess=True)
+
+    # Plot the identification results
+    plot_identification(data)
+
+
+if __name__ == '__main__':
+    main()

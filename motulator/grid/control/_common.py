@@ -139,6 +139,9 @@ class GridConverterControlSystem(ControlSystem, ABC):
         self.pwm = PWM(overmodulation="MPE")
         self.ref = SimpleNamespace()
 
+    def _get_value(self, par, t):
+        return par(t) if callable(par) else par
+
     def get_electrical_measurements(self, fbk, mdl):
         """
         Measure the currents and voltages.
@@ -203,16 +206,15 @@ class GridConverterControlSystem(ControlSystem, ABC):
         """
         if self.dc_bus_voltage_ctrl:
             # DC-bus voltage control mode
-            ref.u_dc = self.ref.u_dc(ref.t)
+            ref.u_dc = self._get_value(self.ref.u_dc, ref.t)
             ref.p_g = self.dc_bus_voltage_ctrl.output(ref.u_dc, fbk.u_dc)
         else:
             # Power control mode
-            ref.p_g = self.ref.p_g(ref.t)
+            ref.p_g = self._get_value(self.ref.p_g, ref.t)
 
         # Reactive power reference (if exists)
         if hasattr(self.ref, 'q_g'):
-            ref.q_g = self.ref.q_g(ref.t) if callable(
-                self.ref.q_g) else self.ref.q_g
+            ref.q_g = self._get_value(self.ref.q_g, ref.t)
 
         return ref
 
