@@ -2,15 +2,18 @@
 
 import copy
 import multiprocessing as mp
+from os.path import join
 from dataclasses import dataclass
+from datetime import datetime
 from time import time
 from types import SimpleNamespace
 
 import numpy as np
+from scipy.io import savemat
 
 from motulator.grid import model, control
 from motulator.grid.utils import (
-    ACFilterPars, BaseValues, NominalValues, plot_identification)
+    ACFilterPars, BaseValues, NominalValues, plot, plot_identification)
 
 # %%
 
@@ -26,30 +29,35 @@ def setup_identification():
     # Filter and grid
     par = ACFilterPars(L_fc=.15*base.L)
     ac_filter = model.LFilter(par)
+    # par = ACFilterPars(
+    #     L_fc=.081*base.L, L_fg=.073*base.L, C_f=.035*base.C, u_fs0=base.u)
+    # ac_filter = model.LCLFilter(par)
     ac_source = model.SignalInjection(w_g=base.w, abs_e_g=base.u)
     # Inverter with constant DC voltage
     converter = model.VoltageSourceConverter(u_dc=650)
 
     # Create system model
     mdl = model.GridConverterIdentification(
-        converter, ac_filter, ac_source, delay=0)
+        converter, ac_filter, ac_source, delay=1)
     # mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
 
     # Configure the control system.
     cfg = control.GridFollowingControlCfg(
-        L=.2*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=.0001)
+        L=.15*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=1/10e3)
     ctrl = control.GridFollowingControl(cfg)
 
     # Configure and run the identification
     identification_cfg = AdmittanceIdentificationCfg(
         op_point=SimpleNamespace(p_g=.4*base.p, q_g=0),
         abs_u_e=.01*base.u,
-        f_start=10,
-        f_stop=4e3,  # Nyquist freq: 1/(2*cfg.T_s)
-        n_freqs=10,
+        f_start=1,
+        f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
+        n_freqs=100,
         multiprocess=True,
         spacing="log",
-        plot_style="bode")
+        plot_style=None,
+        T_eval=1/10e4,
+        filename="gfl_1_5k_100log")
 
     return identification_cfg, mdl, ctrl
 
@@ -94,8 +102,12 @@ class AdmittanceIdentificationCfg:
         identification using parallel threads. The default is True.
     plot_style : str, optional
         Set this variable to plot either the real and imaginary parts of the
-        admittance ("re_im") or the magnitude and phase ("bode"). The default
-        is "re_im".
+        admittance ("re_im") or the magnitude and phase ("bode"). Can also be
+        set to None to disable plotting. The default is "re_im".
+    filename : str, optional
+        If given, the identification result is saved in
+        */matfiles/{date}_{time}_{filename}.mat where * is the project
+        root directory. The default is None.
 
     """
 
@@ -112,6 +124,7 @@ class AdmittanceIdentificationCfg:
     n_periods: int = 10
     multiprocess: bool = True
     plot_style: str = "re_im"
+    filename: str = None
 
     def __post_init__(self):
         if self.freqs is None:
@@ -126,8 +139,20 @@ class AdmittanceIdentificationCfg:
 # %%
 
 
-def custom_error_callback(error):
-    print(f'Got error: {error}')
+def save_mat(data, filename):
+    """Save the identification results in a .mat-file."""
+
+    # Convert the SimpleNamespace object to dict
+    data_dict = dict(data.__dict__.items())
+    # Create the file path
+    timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
+    filepath = join("matfiles", timestamp + filename + ".mat")
+
+    try:
+        savemat(filepath, data_dict)
+        print(f"Data successfully exported to {timestamp + filename}")
+    except Exception as error:
+        print(f"Error saving data: {str(error)}")
 
 
 def dft(cfg, u, f_e):
@@ -173,6 +198,7 @@ def pre_process(cfg, mdl, ctrl):
         ctrl.ref.v_c = cfg.op_point.v_c
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=cfg.t0)
+    # plot(sim)
     return sim
 
 
@@ -262,6 +288,9 @@ def run_identification():
     sim_op = pre_process(cfg, mdl, ctrl)
     t_start = time()
 
+    def custom_error_callback(error):
+        print(f"Error during multiprocessing: {str(error)}")
+
     def collect_result(result):
         results.append(result)
 
@@ -288,9 +317,12 @@ def run_identification():
 
     print(f"Execution time: {(time() - t_start):.2f} s")
     data = post_process(results)
-    plot_identification(data, cfg.plot_style)
+    if cfg.filename is not None:
+        save_mat(data, cfg.filename)
+    if cfg.plot_style is not None:
+        plot_identification(data, cfg.plot_style)
 
 
 if __name__ == '__main__':
-    # Run the identification and plot results
+    # Run the identification
     run_identification()
