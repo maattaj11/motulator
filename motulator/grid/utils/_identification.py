@@ -38,7 +38,7 @@ def setup_identification():
 
     # Create system model
     mdl = model.GridConverterIdentification(
-        converter, ac_filter, ac_source, delay=1)
+        converter, ac_filter, ac_source, delay=0)
     # mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
 
     # Configure the control system.
@@ -48,7 +48,7 @@ def setup_identification():
 
     # Configure and run the identification
     identification_cfg = AdmittanceIdentificationCfg(
-        op_point=SimpleNamespace(p_g=.4*base.p, q_g=0),
+        op_point=SimpleNamespace(p_g=.5*base.p, q_g=0*base.p),
         abs_u_e=.01*base.u,
         f_start=1,
         f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
@@ -57,7 +57,7 @@ def setup_identification():
         spacing="log",
         plot_style=None,
         T_eval=1/10e4,
-        filename="gfl_1_5k_100log")
+        filename="gfl_f1-5k_n100log_p0.5_q0")
 
     return identification_cfg, mdl, ctrl
 
@@ -178,7 +178,7 @@ def copy_state(sim):
     ac_source = copy.deepcopy(sim.mdl.ac_source)
     converter.sol_q_cs = []
     mdl = model.GridConverterIdentification(
-        converter, ac_filter, ac_source, delay=1)
+        converter, ac_filter, ac_source, delay=0)
     for subsystem in mdl.subsystems:
         if hasattr(subsystem, "sol_states"):
             for attr in vars(subsystem.sol_states):
@@ -262,10 +262,10 @@ def identify(cfg, sim_op, i, f_e):
 
     # Calculate the elements of the output admittance matrix
     det_u = u_gd1*u_gq2 - u_gd2*u_gq1
-    Y_dd = (i_gd1*u_gq2 - i_gd2*u_gq1)/det_u
-    Y_qd = (i_gq1*u_gq2 - i_gq2*u_gq1)/det_u
-    Y_dq = (-i_gd1*u_gd2 + i_gd2*u_gd1)/det_u
-    Y_qq = (-i_gq1*u_gd2 + i_gq2*u_gd1)/det_u
+    Y_dd = -1*(i_gd1*u_gq2 - i_gd2*u_gq1)/det_u
+    Y_qd = -1*(i_gq1*u_gq2 - i_gq2*u_gq1)/det_u
+    Y_dq = -1*(-i_gd1*u_gd2 + i_gd2*u_gd1)/det_u
+    Y_qq = -1*(-i_gq1*u_gd2 + i_gq2*u_gd1)/det_u
     return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
 
 

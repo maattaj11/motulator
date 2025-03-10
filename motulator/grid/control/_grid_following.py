@@ -1,13 +1,14 @@
 """Grid-following control methods."""
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 
 from motulator.common.control import ComplexPIController
 from motulator.grid.control._common import (
     CurrentLimiter, GridConverterControlSystem, PLL)
-from motulator.common.utils import abc2complex
+from motulator.common.utils import abc2complex, wrap
 
 
 # %%
@@ -67,8 +68,8 @@ class GridFollowingControl(GridConverterControlSystem):
     def __init__(self, cfg):
         super().__init__(cfg.T_s)
         self.cfg = cfg
-        self.current_ctrl = CurrentController(cfg)
-        self.pll = PLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
+        self.current_ctrl = ProportionalCurrentController(cfg)
+        self.pll = ProportionalPLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
         self.current_reference = CurrentReference(cfg)
 
     def get_feedback_signals(self, mdl):
@@ -150,3 +151,43 @@ class CurrentReference:
         ref.i_c = 2*(ref.p_g - 1j*ref.q_g)/(3*self.nom_u_g)
         ref.i_c = self.current_limiter(ref.i_c)
         return ref
+
+
+# %%
+class ProportionalCurrentController:
+
+    def __init__(self, cfg):
+        self.k_p = cfg.alpha_c*cfg.L
+        self.w_g = cfg.nom_w
+        self.L = cfg.L
+
+    def output(self, ref_i, i, _):
+        u = self.k_p*(ref_i - i) + 1j*self.w_g*self.L*i
+        return u
+
+    def update(self, *args):
+        pass
+
+
+# %%
+class ProportionalPLL:
+
+    def __init__(self, alpha_pll, abs_u_g0, w_g0, theta_c0=0):
+        self.k_p = alpha_pll/abs_u_g0
+        self.est = SimpleNamespace(
+            w_g=w_g0, theta_c=theta_c0, abs_u_g=abs_u_g0)
+
+    def output(self, fbk):
+        fbk.theta_c = self.est.theta_c
+        fbk.w_g = self.est.w_g
+        # Coordinate transformations
+        fbk.u_g = np.exp(-1j*fbk.theta_c)*fbk.u_gs
+        fbk.i_c = np.exp(-1j*fbk.theta_c)*fbk.i_cs
+        fbk.u_c = np.exp(-1j*fbk.theta_c)*fbk.u_cs
+        # Angular speed of the coordinate system
+        fbk.w_c = fbk.w_g + self.k_p*fbk.u_g.imag
+        return fbk
+
+    def update(self, T_s, fbk):
+        self.est.theta_c += T_s*fbk.w_c
+        self.est.theta_c = wrap(self.est.theta_c)
