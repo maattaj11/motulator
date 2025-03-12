@@ -13,19 +13,34 @@ from scipy.io import savemat
 
 from motulator.grid import model, control
 from motulator.grid.utils import (
-    ACFilterPars, BaseValues, NominalValues, plot, plot_identification)
+    ACFilterPars, BaseValues, NominalValues, plot_identification)
+
+# from motulator.grid.utils import plot
+
 
 # %%
-
-
 def setup_identification():
-    # Compute base values based on the nominal values.
+    """Configure the identification."""
 
+    # Compute base values based on the nominal values.
     nom = NominalValues(U=400, I=18, f=50, P=12.5e3)
     base = BaseValues.from_nominal(nom)
 
-    # Configure the system model.
+    # Configure the identification
+    identification_cfg = AdmittanceIdentificationCfg(
+        op_point=SimpleNamespace(p_g=.5*base.p, q_g=0*base.p),
+        abs_u_e=.01*base.u,
+        f_start=10,
+        f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
+        n_freqs=20,
+        multiprocess=True,
+        spacing="log",
+        T_eval=1/10e4,
+        delay=0,
+        plot_style="Bode",
+        filename=None)  #"gfl_f1-5k_n100log_p0.5_q0")
 
+    # Configure the system model.
     # Filter and grid
     par = ACFilterPars(L_fc=.15*base.L)
     ac_filter = model.LFilter(par)
@@ -38,26 +53,12 @@ def setup_identification():
 
     # Create system model
     mdl = model.GridConverterIdentification(
-        converter, ac_filter, ac_source, delay=0)
-    # mdl.pwm = model.CarrierComparison()  # Uncomment to enable the PWM model
+        converter, ac_filter, ac_source, delay=identification_cfg.delay)
 
     # Configure the control system.
     cfg = control.GridFollowingControlCfg(
         L=.15*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=1/10e3)
     ctrl = control.GridFollowingControl(cfg)
-
-    # Configure and run the identification
-    identification_cfg = AdmittanceIdentificationCfg(
-        op_point=SimpleNamespace(p_g=.5*base.p, q_g=0*base.p),
-        abs_u_e=.01*base.u,
-        f_start=1,
-        f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
-        n_freqs=100,
-        multiprocess=True,
-        spacing="log",
-        plot_style=None,
-        T_eval=1/10e4,
-        filename="gfl_f1-5k_n100log_p0.5_q0")
 
     return identification_cfg, mdl, ctrl
 
@@ -108,6 +109,9 @@ class AdmittanceIdentificationCfg:
         If given, the identification result is saved in
         */matfiles/{date}_{time}_{filename}.mat where * is the project
         root directory. The default is None.
+    delay : int, optional
+        Number of samples for modeling the computational delay. The default
+        is zero.
 
     """
 
@@ -125,6 +129,7 @@ class AdmittanceIdentificationCfg:
     multiprocess: bool = True
     plot_style: str = "re_im"
     filename: str = None
+    delay: int = 0
 
     def __post_init__(self):
         if self.freqs is None:
@@ -170,7 +175,7 @@ def dft(cfg, u, f_e):
     return y
 
 
-def copy_state(sim):
+def copy_state(cfg, sim):
     """Make a copy of the simulation state."""
     # Copy the subsystems
     ac_filter = copy.deepcopy(sim.mdl.ac_filter)
@@ -178,7 +183,7 @@ def copy_state(sim):
     ac_source = copy.deepcopy(sim.mdl.ac_source)
     converter.sol_q_cs = []
     mdl = model.GridConverterIdentification(
-        converter, ac_filter, ac_source, delay=0)
+        converter, ac_filter, ac_source, delay=cfg.delay)
     for subsystem in mdl.subsystems:
         if hasattr(subsystem, "sol_states"):
             for attr in vars(subsystem.sol_states):
@@ -191,14 +196,16 @@ def copy_state(sim):
 
 def pre_process(cfg, mdl, ctrl):
     """Simulate the system to the desired operating point."""
+
+    # Set appropriate references
     ctrl.ref.p_g = cfg.op_point.p_g
     if hasattr(cfg.op_point, "q_g"):
         ctrl.ref.q_g = cfg.op_point.q_g
     if hasattr(cfg.op_point, "v_c"):
         ctrl.ref.v_c = cfg.op_point.v_c
+    # Create Simulation object and simulate
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=cfg.t0)
-    # plot(sim)
     return sim
 
 
@@ -206,7 +213,7 @@ def identify(cfg, sim_op, i, f_e):
     """Calculate the output admittance at a single frequency."""
 
     # 1) d-axis injection
-    mdl, ctrl = copy_state(sim_op)
+    mdl, ctrl = copy_state(cfg, sim_op)
     mdl.ac_source.par.f_e = f_e
     mdl.ac_source.par.abs_u_ed = cfg.abs_u_e
     # Set new stop time and simulate
@@ -225,21 +232,14 @@ def identify(cfg, sim_op, i, f_e):
     i_gd1 = dft(cfg, i_g1.real, f_e)
     i_gq1 = dft(cfg, i_g1.imag, f_e)
 
-    # y = fft(u_g1.real)
-    # plt.semilogx(
-    #     fftfreq(np.size(u_g1), self.cfg.T_eval),
-    #     np.abs(y)/np.size(u_g1))
-    # plt.show()
-
-    # plot(sim)
-
     # 2) q-axis injection
-    mdl, ctrl = copy_state(sim_op)
+    mdl, ctrl = copy_state(cfg, sim_op)
     mdl.ac_source.par.f_e = f_e
     mdl.ac_source.par.abs_u_eq = cfg.abs_u_e
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
 
+    # DFT
     u_g2 = np.conj(
         sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.u_gs
     u_gd2 = dft(cfg, u_g2.real, f_e)
@@ -249,23 +249,16 @@ def identify(cfg, sim_op, i, f_e):
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
 
-    # print(
-    #     f"u_gd1: magnitude {np.abs(u_gd1)}, phase {np.angle(u_gd1)}\n" +
-    #     f"u_gq1: magnitude {np.abs(u_gq1)}, phase {np.angle(u_gq1)}\n" +
-    #     f"i_gd1: magnitude {np.abs(i_gd1)}, phase {np.angle(i_gd1)}\n" +
-    #     f"i_gq1: magnitude {np.abs(i_gq1)}, phase {np.angle(i_gq1)}\n\n" +
-    #     f"u_gd2: magnitude {np.abs(u_gd2)}, phase {np.angle(u_gd2)}\n" +
-    #     f"u_gq2: magnitude {np.abs(u_gq2)}, phase {np.angle(u_gq2)}\n" +
-    #     f"i_gd2: magnitude {np.abs(i_gd2)}, phase {np.angle(i_gd2)}\n" +
-    #     f"i_gq2: magnitude {np.abs(i_gq2)}, phase {np.angle(i_gq2)}")
-    # plot(sim)
-
     # Calculate the elements of the output admittance matrix
-    det_u = u_gd1*u_gq2 - u_gd2*u_gq1
-    Y_dd = -1*(i_gd1*u_gq2 - i_gd2*u_gq1)/det_u
-    Y_qd = -1*(i_gq1*u_gq2 - i_gq2*u_gq1)/det_u
-    Y_dq = -1*(-i_gd1*u_gd2 + i_gd2*u_gd1)/det_u
-    Y_qq = -1*(-i_gq1*u_gd2 + i_gq2*u_gd1)/det_u
+    I = np.array([[i_gd1, i_gd2], [i_gq1, i_gq2]])
+    U = np.array([[u_gd1, u_gd2], [u_gq1, u_gq2]])
+    inv_U = np.linalg.inv(U)
+    Y_c = -1*I @ inv_U
+
+    Y_dd = Y_c[0, 0]
+    Y_qd = Y_c[0, 1]
+    Y_dq = Y_c[1, 0]
+    Y_qq = Y_c[1, 1]
     return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
 
 
