@@ -2,9 +2,9 @@
 
 import copy
 import multiprocessing as mp
-from os.path import join
 from dataclasses import dataclass
 from datetime import datetime
+from os.path import join
 from time import time
 from types import SimpleNamespace
 
@@ -30,15 +30,15 @@ def setup_identification():
     identification_cfg = AdmittanceIdentificationCfg(
         op_point=SimpleNamespace(p_g=.5*base.p, q_g=0*base.p),
         abs_u_e=.01*base.u,
-        f_start=10,
+        f_start=1,
         f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
-        n_freqs=20,
+        n_freqs=100,
         multiprocess=True,
         spacing="log",
         T_eval=1/10e4,
         delay=0,
-        plot_style="Bode",
-        filename=None)  #"gfl_f1-5k_n100log_p0.5_q0")
+        plot_style=None,
+        filename="gfl_f1-5k_n100log_p0.5_q0")
 
     # Configure the system model.
     # Filter and grid
@@ -139,6 +139,8 @@ class AdmittanceIdentificationCfg:
             else:
                 self.freqs = np.geomspace(
                     self.f_start, self.f_stop, self.n_freqs)
+        # Increase excitation signal amplitude with the frequency
+        self.amplitudes = self.abs_u_e*np.linspace(1., 5., np.size(self.freqs))
 
 
 # %%
@@ -215,7 +217,7 @@ def identify(cfg, sim_op, i, f_e):
     # 1) d-axis injection
     mdl, ctrl = copy_state(cfg, sim_op)
     mdl.ac_source.par.f_e = f_e
-    mdl.ac_source.par.abs_u_ed = cfg.abs_u_e
+    mdl.ac_source.par.abs_u_ed = cfg.amplitudes[i]
     # Set new stop time and simulate
     t_stop = cfg.t0 + cfg.t1 + cfg.n_periods/f_e
     sim = model.Simulation(mdl, ctrl)
@@ -235,7 +237,7 @@ def identify(cfg, sim_op, i, f_e):
     # 2) q-axis injection
     mdl, ctrl = copy_state(cfg, sim_op)
     mdl.ac_source.par.f_e = f_e
-    mdl.ac_source.par.abs_u_eq = cfg.abs_u_e
+    mdl.ac_source.par.abs_u_eq = cfg.amplitudes[i]
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
 
