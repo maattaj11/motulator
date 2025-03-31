@@ -133,10 +133,10 @@ class GridConverterControlSystem(ControlSystem, ABC):
 
     """
 
-    def __init__(self, T_s):
+    def __init__(self, T_s, k_comp=1.5):
         super().__init__(T_s)
         self.dc_bus_voltage_ctrl = None
-        self.pwm = PWM(overmodulation="MPE", k_comp=.5)
+        self.pwm = PWM(overmodulation="MPE", k_comp=k_comp)
         self.ref = SimpleNamespace()
 
     def _get_value(self, par, t):

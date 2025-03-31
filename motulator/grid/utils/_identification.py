@@ -13,7 +13,7 @@ from scipy.io import savemat
 
 from motulator.grid import model, control
 from motulator.grid.utils import (
-    ACFilterPars, BaseValues, NominalValues, plot_identification)
+    ACFilterPars, BaseValues, NominalValues, plot, plot_identification)
 
 # from motulator.grid.utils import plot
 
@@ -28,17 +28,18 @@ def setup_identification():
 
     # Configure the identification
     identification_cfg = AdmittanceIdentificationCfg(
-        op_point=SimpleNamespace(p_g=.5*base.p, q_g=0*base.p),
+        op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),
         abs_u_e=.01*base.u,
         f_start=1,
         f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
         n_freqs=100,
         multiprocess=True,
         spacing="log",
-        T_eval=1/10e4,
+        T_eval=1/100e3,
         delay=0,
+        k_comp=0.5,
         plot_style=None,
-        filename="gfl_f1-5k_n100log_p0.5_q0")
+        filename="gfl_f1-5k_n100log_p0.5_q0.5_PI_test")
 
     # Configure the system model.
     # Filter and grid
@@ -57,7 +58,12 @@ def setup_identification():
 
     # Configure the control system.
     cfg = control.GridFollowingControlCfg(
-        L=.15*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=1/10e3)
+        L=.15*base.L,
+        nom_u=base.u,
+        nom_w=base.w,
+        max_i=1.5*base.i,
+        T_s=1/10e3,
+        k_comp=identification_cfg.k_comp)
     ctrl = control.GridFollowingControl(cfg)
 
     return identification_cfg, mdl, ctrl
@@ -112,6 +118,9 @@ class AdmittanceIdentificationCfg:
     delay : int, optional
         Number of samples for modeling the computational delay. The default
         is zero.
+    k_comp : float, optional
+        Compensation factor for the delay effect on the converter output
+        voltage vector angle. The default is 1.5.
 
     """
 
@@ -130,6 +139,7 @@ class AdmittanceIdentificationCfg:
     plot_style: str = "re_im"
     filename: str = None
     delay: int = 0
+    k_comp: float = 1.5
 
     def __post_init__(self):
         if self.freqs is None:

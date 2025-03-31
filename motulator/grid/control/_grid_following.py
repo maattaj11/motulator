@@ -42,6 +42,7 @@ class GridFollowingControlCfg:
     T_s: float = 100e-6
     alpha_c: float = 2*np.pi*400
     alpha_pll: float = 2*np.pi*20
+    k_comp: float = 1.5
 
 
 # %%
@@ -66,9 +67,13 @@ class GridFollowingControl(GridConverterControlSystem):
     """
 
     def __init__(self, cfg):
-        super().__init__(cfg.T_s)
+        super().__init__(cfg.T_s, k_comp=cfg.k_comp)
         self.cfg = cfg
-        self.current_ctrl = ProportionalCurrentController(cfg)
+        self.current_ctrl = CurrentController(cfg)
+        # self.pll = PLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
+
+        # Use simple proportional control
+        # self.current_ctrl = ProportionalCurrentController(cfg)
         self.pll = ProportionalPLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
         self.current_reference = CurrentReference(cfg)
 
@@ -90,7 +95,7 @@ class GridFollowingControl(GridConverterControlSystem):
         ref = self.current_reference.get_current_reference(ref)
         # Voltage reference generation in synchronous coordinates
         ref.u_c = self.current_ctrl.output(
-            ref.i_c, fbk.i_c, self.pll.est.abs_u_g)
+            ref.i_c, fbk.i_c)  #, self.pll.est.abs_u_g)
         ref.u_cs = np.exp(1j*fbk.theta_c)*ref.u_c
         # Duty ratios for PWM
         ref.d_abc = self.pwm(ref.T_s, ref.u_cs, fbk.u_dc, fbk.w_c)
@@ -161,8 +166,8 @@ class ProportionalCurrentController:
         self.w_g = cfg.nom_w
         self.L = cfg.L
 
-    def output(self, ref_i, i, _):
-        u = self.k_p*(ref_i - i) + 1j*self.w_g*self.L*i
+    def output(self, ref_i, i, abs_u_g):
+        u = self.k_p*(ref_i - i) + 1j*self.w_g*self.L*i + abs_u_g
         return u
 
     def update(self, *args):
