@@ -69,12 +69,12 @@ class GridFollowingControl(GridConverterControlSystem):
     def __init__(self, cfg):
         super().__init__(cfg.T_s, k_comp=cfg.k_comp)
         self.cfg = cfg
-        self.current_ctrl = CurrentController(cfg)
-        # self.pll = PLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
+        # self.current_ctrl = CurrentController(cfg)
+        self.pll = PLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
 
         # Use simple proportional control
-        # self.current_ctrl = ProportionalCurrentController(cfg)
-        self.pll = ProportionalPLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
+        self.current_ctrl = ProportionalCurrentController(cfg)
+        # self.pll = ProportionalPLL(cfg.alpha_pll, cfg.nom_u, cfg.nom_w)
         self.current_reference = CurrentReference(cfg)
 
     def get_feedback_signals(self, mdl):
@@ -95,7 +95,7 @@ class GridFollowingControl(GridConverterControlSystem):
         ref = self.current_reference.get_current_reference(ref)
         # Voltage reference generation in synchronous coordinates
         ref.u_c = self.current_ctrl.output(
-            ref.i_c, fbk.i_c)  #, self.pll.est.abs_u_g)
+            ref.i_c, fbk.i_c, self.pll.est.abs_u_g)
         ref.u_cs = np.exp(1j*fbk.theta_c)*ref.u_c
         # Duty ratios for PWM
         ref.d_abc = self.pwm(ref.T_s, ref.u_cs, fbk.u_dc, fbk.w_c)

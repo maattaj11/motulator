@@ -61,6 +61,8 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
     e_g_abc = complex2abc(mdl.ac_source.data.e_gs).T
     u_g_abc = complex2abc(mdl.ac_filter.data.u_gs).T
 
+    i_g = mdl.ac_filter.data.i_gs*np.conj(mdl.ac_source.data.exp_j_theta_g)
+
     # Calculation of active and reactive powers
     p_g = 1.5*np.real(mdl.ac_filter.data.e_gs*np.conj(mdl.ac_filter.data.i_gs))
     q_g = 1.5*np.imag(mdl.ac_filter.data.e_gs*np.conj(mdl.ac_filter.data.i_gs))
@@ -217,11 +219,38 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
         "--",
         label=r"$i_\mathrm{cq,ref}$",
         ds="steps-post")
+    # ax2.plot(
+    #     mdl.ac_source.data.t,
+    #     np.real(i_g/base.i),
+    #     "--",
+    #     label=r"$i_\mathrm{gd}$",
+    #     ds="steps-post")
+    # ax2.plot(
+    #     mdl.ac_source.data.t,
+    #     np.imag(i_g/base.i),
+    #     "--",
+    #     label=r"$i_\mathrm{gq}$",
+    #     ds="steps-post")
     ax2.legend()
     ax2.set_xlim(t_span)
     ax2.set_xticklabels([])
 
-    if hasattr(sim.ctrl, "observer"):
+    if isinstance(mdl, model.GridConverterIdentification):
+        # Subplot 3: Synchronous frame grid voltage
+        e_g = np.conj(mdl.ac_source.data.exp_j_theta_g)*mdl.ac_source.data.e_gs
+
+        ax3.plot(
+            mdl.ac_source.data.t,
+            np.real(e_g/base.u),
+            label=r"$e_\mathrm{gd}$",
+            ds="steps-post")
+        ax3.plot(
+            mdl.ac_source.data.t,
+            np.imag(e_g/base.u),
+            label=r"$e_\mathrm{gq}$",
+            ds="steps-post")
+
+    elif hasattr(sim.ctrl, "observer"):
         # Subplot 3: Converter voltage reference, quasi-static converter
         # voltage, and grid voltage magnitudes
         ax3.plot(
@@ -239,21 +268,6 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
             np.abs(mdl.ac_source.data.e_gs/base.u),
             "k--",
             label=r"$e_\mathrm{g}$")
-
-    elif isinstance(mdl, model.GridConverterIdentification):
-        # Subplot 3: Synchronous frame grid voltage
-        e_g = np.conj(mdl.ac_source.data.exp_j_theta_g)*mdl.ac_source.data.e_gs
-
-        ax3.plot(
-            mdl.ac_source.data.t,
-            np.real(e_g/base.u),
-            label=r"$e_\mathrm{gd}$",
-            ds="steps-post")
-        ax3.plot(
-            mdl.ac_source.data.t,
-            np.imag(e_g/base.u),
-            label=r"$e_\mathrm{gq}$",
-            ds="steps-post")
 
     else:
         # Subplot 3: Converter voltage reference and grid voltage magnitude
@@ -383,27 +397,27 @@ def plot_identification(data_sim, plot_style):
         ax7.set_ylabel(r"$|Y_\mathrm{qq}|\ (\Omega^{-1})$")
         ax8.set_ylabel(r"$\angle Y_\mathrm{qq}\ (\mathrm{deg})$")
 
-        ax1.set_ylim(ylim)
-        ax2.set_ylim(ylim_angle)
-        ax3.set_ylim(ylim)
-        ax4.set_ylim(ylim_angle)
-        ax5.set_ylim(ylim)
-        ax6.set_ylim(ylim_angle)
-        ax7.set_ylim(ylim)
-        ax8.set_ylim(ylim_angle)
+        # ax1.set_ylim(ylim)
+        # ax2.set_ylim(ylim_angle)
+        # ax3.set_ylim(ylim)
+        # ax4.set_ylim(ylim_angle)
+        # ax5.set_ylim(ylim)
+        # ax6.set_ylim(ylim_angle)
+        # ax7.set_ylim(ylim)
+        # ax8.set_ylim(ylim_angle)
 
-        ax1.set_yticks(yticks)
-        ax2.set_yticks(yticks_angle)
-        ax2.set_yticklabels(ylabels_angle)
-        ax3.set_yticks(yticks)
-        ax4.set_yticks(yticks_angle)
-        ax4.set_yticklabels(ylabels_angle)
-        ax5.set_yticks(yticks)
-        ax6.set_yticks(yticks_angle)
-        ax6.set_yticklabels(ylabels_angle)
-        ax7.set_yticks(yticks)
-        ax8.set_yticks(yticks_angle)
-        ax8.set_yticklabels(ylabels_angle)
+        # ax1.set_yticks(yticks)
+        # ax2.set_yticks(yticks_angle)
+        # ax2.set_yticklabels(ylabels_angle)
+        # ax3.set_yticks(yticks)
+        # ax4.set_yticks(yticks_angle)
+        # ax4.set_yticklabels(ylabels_angle)
+        # ax5.set_yticks(yticks)
+        # ax6.set_yticks(yticks_angle)
+        # ax6.set_yticklabels(ylabels_angle)
+        # ax7.set_yticks(yticks)
+        # ax8.set_yticks(yticks_angle)
+        # ax8.set_yticklabels(ylabels_angle)
 
     else:
         ylim = (-0.05, 0.11)
@@ -426,14 +440,14 @@ def plot_identification(data_sim, plot_style):
         ax7.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
         ax8.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{qq}\}\ (\Omega^{-1})$")
 
-        ax1.set_ylim(ylim)
-        ax2.set_ylim(ylim)
-        ax3.set_ylim(ylim)
-        ax4.set_ylim(ylim)
-        ax5.set_ylim(ylim)
-        ax6.set_ylim(ylim)
-        ax7.set_ylim(ylim)
-        ax8.set_ylim(ylim)
+        # ax1.set_ylim(ylim)
+        # ax2.set_ylim(ylim)
+        # ax3.set_ylim(ylim)
+        # ax4.set_ylim(ylim)
+        # ax5.set_ylim(ylim)
+        # ax6.set_ylim(ylim)
+        # ax7.set_ylim(ylim)
+        # ax8.set_ylim(ylim)
 
     ax4.set_xlabel(r"Frequency (Hz)")
     ax8.set_xlabel(r"Frequency (Hz)")

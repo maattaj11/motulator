@@ -24,28 +24,35 @@ base = BaseValues.from_nominal(nom)
 # Configure the system model.
 
 # Filter and grid parameters
-par = ACFilterPars(L_fc=.15*base.L, R_fc=.05*base.Z, L_g=.74*base.L)
+par = ACFilterPars(L_fc=.15*base.L)  #, R_fc=.05*base.Z, L_g=.74*base.L)
 # par.L_g = 0  # Uncomment this line to simulate a strong grid
-ac_filter = model.ACFilter(par)
-ac_source = model.ThreePhaseVoltageSource(w_g=base.w, abs_e_g=base.u)
+ac_filter = model.LFilter(par)
+# ac_source = model.ThreePhaseVoltageSource(w_g=base.w, abs_e_g=base.u)
+ac_source = model.SignalInjection(w_g=base.w, abs_e_g=base.u)
 # Inverter with constant DC voltage
 converter = model.VoltageSourceConverter(u_dc=650)
 
+ac_source.par.f_e = 50
+ac_source.par.abs_u_ed = .01*base.u
+# ac_source.par.abs_u_eq = .01*base.u
+
 # Create system model
-mdl = model.GridConverterSystem(converter, ac_filter, ac_source)
+mdl = model.GridConverterIdentification(
+    converter, ac_filter, ac_source, delay=0)
 
 # %%
 # Configure the control system.
 
 # Set the configuration parameters
 cfg = control.ObserverBasedGridFormingControlCfg(
-    L=.35*base.L,
-    R=.05*base.Z,
+    L=.15*base.L,
+    #R=.05*base.Z,
     nom_u=base.u,
     nom_w=base.w,
     max_i=1.3*base.i,
     R_a=.2*base.Z,
-    T_s=100e-6)
+    T_s=100e-6,
+    k_comp=0.5)
 
 # Create the control system
 ctrl = control.ObserverBasedGridFormingControl(cfg)
@@ -57,8 +64,9 @@ ctrl = control.ObserverBasedGridFormingControl(cfg)
 ctrl.ref.v_c = lambda t: base.u
 
 # Active power reference
-ctrl.ref.p_g = lambda t: ((t > .2)/3 + (t > .5)/3 + (t > .8)/3 -
-                          (t > 1.2))*nom.P
+# ctrl.ref.p_g = lambda t: ((t > .2)/3 + (t > .5)/3 + (t > .8)/3 -
+#                           (t > 1.2))*nom.P
+ctrl.ref.p_g = lambda t: (t > .2)*(-0.5)*nom.P
 
 # Uncomment line below to simulate operation in rectifier mode
 # ctrl.ref.p_g = lambda t: ((t > .2) - (t > .7)*2 + (t > 1.2))*nom.P
@@ -71,9 +79,9 @@ ctrl.ref.p_g = lambda t: ((t > .2)/3 + (t > .5)/3 + (t > .8)/3 -
 # Create the simulation object and simulate it.
 
 sim = model.Simulation(mdl, ctrl)
-sim.simulate(t_stop=1.5)
+sim.simulate(t_stop=2)
 
 # %%
 # Plot the results.
 
-plot(sim, base)
+plot(sim)

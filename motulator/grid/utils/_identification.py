@@ -28,7 +28,8 @@ def setup_identification():
 
     # Configure the identification
     identification_cfg = AdmittanceIdentificationCfg(
-        op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),
+        op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),  # GFL
+        # op_point=SimpleNamespace(p_g=-0.5*base.p, v_c=base.u),  # Observer GFM
         abs_u_e=.01*base.u,
         f_start=1,
         f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
@@ -39,7 +40,9 @@ def setup_identification():
         delay=0,
         k_comp=0.5,
         plot_style=None,
-        filename="gfl_f1-5k_n100log_p0.5_q0.5_PI_test")
+        # filename=None)
+        # filename="obs_f1-5k_n100log_p-0.5")
+        filename="gfl_f1-5k_n100log_p0.5_q0.5")
 
     # Configure the system model.
     # Filter and grid
@@ -57,6 +60,8 @@ def setup_identification():
         converter, ac_filter, ac_source, delay=identification_cfg.delay)
 
     # Configure the control system.
+
+    # GFL
     cfg = control.GridFollowingControlCfg(
         L=.15*base.L,
         nom_u=base.u,
@@ -65,6 +70,19 @@ def setup_identification():
         T_s=1/10e3,
         k_comp=identification_cfg.k_comp)
     ctrl = control.GridFollowingControl(cfg)
+
+    # Observer GFM
+    # cfg = control.ObserverBasedGridFormingControlCfg(
+    #     L=.15*base.L,
+    #     nom_u=base.u,
+    #     nom_w=base.w,
+    #     max_i=1.3*base.i,
+    #     R_a=.2*base.Z,
+    #     k_v=1,
+    #     alpha_o=base.w,
+    #     T_s=1/10e3,
+    #     k_comp=identification_cfg.k_comp)
+    # ctrl = control.ObserverBasedGridFormingControl(cfg)
 
     return identification_cfg, mdl, ctrl
 
@@ -232,6 +250,7 @@ def identify(cfg, sim_op, i, f_e):
     t_stop = cfg.t0 + cfg.t1 + cfg.n_periods/f_e
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
+    # plot(sim)
 
     # Transform the voltage and current to synchronous coordinates and
     # calculate the DFT
@@ -250,6 +269,7 @@ def identify(cfg, sim_op, i, f_e):
     mdl.ac_source.par.abs_u_eq = cfg.amplitudes[i]
     sim = model.Simulation(mdl, ctrl)
     sim.simulate(t_stop=t_stop, T_eval=cfg.T_eval)
+    # plot(sim)
 
     # DFT
     u_g2 = np.conj(
@@ -271,7 +291,10 @@ def identify(cfg, sim_op, i, f_e):
     Y_qd = Y_c[0, 1]
     Y_dq = Y_c[1, 0]
     Y_qq = Y_c[1, 1]
-    return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
+    return [
+        i, f_e, Y_dd, Y_qd, Y_dq, Y_qq, u_gd1, u_gq1, i_gd1, i_gq1, u_gd2,
+        u_gq2, i_gd2, i_gq2
+    ]
 
 
 def post_process(results):
@@ -283,6 +306,14 @@ def post_process(results):
     data1.Y_qd = results[:, 3]
     data1.Y_dq = results[:, 4]
     data1.Y_qq = results[:, 5]
+    data1.u_gd1 = results[:, 6]
+    data1.u_gq1 = results[:, 7]
+    data1.i_gd1 = results[:, 8]
+    data1.i_gq1 = results[:, 9]
+    data1.u_gd2 = results[:, 10]
+    data1.u_gq2 = results[:, 11]
+    data1.i_gd2 = results[:, 12]
+    data1.i_gq2 = results[:, 13]
     return data1
 
 

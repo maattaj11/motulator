@@ -52,7 +52,7 @@ class PLL:
         """Update the integral states."""
         self.est.theta_c += T_s*fbk.w_c
         self.est.theta_c = wrap(self.est.theta_c)
-        self.est.w_g += T_s*self.gain.k_w*fbk.eps
+        # self.est.w_g += T_s*self.gain.k_w*fbk.eps
         self.est.abs_u_g += T_s*self.gain.alpha_g*(
             fbk.u_g.real - self.est.abs_u_g)
 

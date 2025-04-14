@@ -49,6 +49,7 @@ class ObserverBasedGridFormingControlCfg:
     alpha_c: float = 2*np.pi*400
     alpha_o: float = 2*np.pi*50
     T_s: float = 100e-6
+    k_comp: float = 1.5
 
     def __post_init__(self):
         if self.R_a is None:
@@ -87,7 +88,7 @@ class ObserverBasedGridFormingControl(GridConverterControlSystem):
     """
 
     def __init__(self, cfg):
-        super().__init__(cfg.T_s)
+        super().__init__(cfg.T_s, k_comp=cfg.k_comp)
         self.cfg = cfg
         self.observer = DisturbanceObserver(cfg)
         self.current_limiter = CurrentLimiter(cfg.max_i)
