@@ -32,12 +32,12 @@ def setup_identification():
         # op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),  # GFL
         op_point=SimpleNamespace(p_g=0.5*base.p, v_c=base.u),  # Observer GFM
         abs_u_e=.01*base.u,
-        f_start=1,
+        f_start=10,
         f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
         n_freqs=100,
-        multiprocess=True,
+        multiprocess=False,
         spacing="log",
-        T_eval=1/100e3,
+        T_s=1/10e3,
         delay=1,
         k_comp=1.5,
         plot_style=None,
@@ -81,7 +81,7 @@ def setup_identification():
         R_a=.2*base.Z,
         k_v=1,
         alpha_o=base.w,
-        T_s=1/10e3,
+        T_s=identification_cfg.T_s,
         k_comp=identification_cfg.k_comp)
     ctrl = control.ObserverBasedGridFormingControl(cfg)
 
@@ -111,18 +111,19 @@ class AdmittanceIdentificationCfg:
         the array of measurement frequencies. The default is "log".
     freqs : ndarray, optional
         Manually specified array of frequencies (Hz) to measure admittance at.
-        The default is None, and then f_start, f_stop and n_freqs are used.
+        If set to None, f_start, f_stop and n_freqs parameters are used to
+        create the array of frequencies. The default is None.
     t0 : float, optional
         Stop time for initial simulating to the operating point (s). Should be
         large enough to reach steady-state. The default is 0.1.
     t1 : float, optional
         Additional simulation time for reaching steady-state during signal
         injection (s). The default is 0.02.
-    T_eval : float, optional
-        Evaluation period for the solver. Since one sampling period is
-        simulated at a time, the sampling period needs to be an integer
-        multiple of the evaluation period to keep the continuous-time signals
-        evenly spaced. The default is 1e-5.
+    T_s : float, optional
+        Sampling period of the control system (s). The default is 1/10e3.
+    n_sol : int, optional
+        Number of evenly spaced data points the solver should return for each
+        controller sampling period. The default is 10.
     n_periods : int, optional
         Number of excitation signal periods to use for calculating the DFT. The
         default is 10.
@@ -155,7 +156,8 @@ class AdmittanceIdentificationCfg:
     freqs: np.ndarray = None
     t0: float = .1
     t1: float = .02
-    T_eval: float = 1e-5
+    T_s: float = 1/10e3
+    n_sol: int = 10
     n_periods: int = 10
     multiprocess: bool = True
     plot_style: str = "re_im"
@@ -164,6 +166,7 @@ class AdmittanceIdentificationCfg:
     k_comp: float = 1.5
 
     def __post_init__(self):
+        # Create array of frequencies if not specified
         if self.freqs is None:
             if self.spacing == "lin":
                 self.freqs = np.linspace(
@@ -173,6 +176,8 @@ class AdmittanceIdentificationCfg:
                     self.f_start, self.f_stop, self.n_freqs)
         # Increase excitation signal amplitude with the frequency
         self.amplitudes = self.abs_u_e*np.linspace(1., 5., np.size(self.freqs))
+        # Evaluation period for the solver
+        self.T_eval = self.T_s/self.n_sol
 
 
 # %%
