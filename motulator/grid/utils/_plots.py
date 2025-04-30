@@ -236,8 +236,9 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
     ax2.set_xticklabels([])
 
     if isinstance(mdl, model.GridConverterIdentification):
-        # Subplot 3: Synchronous frame grid voltage
-        e_g = np.conj(mdl.ac_source.data.exp_j_theta_g)*mdl.ac_source.data.e_gs
+        # Subplot 3: Synchronous frame grid and PCC voltages
+        e_g = mdl.ac_source.data.e_gs*np.conj(mdl.ac_source.data.exp_j_theta_g)
+        u_g = mdl.ac_filter.data.u_gs*np.conj(mdl.ac_source.data.exp_j_theta_g)
 
         ax3.plot(
             mdl.ac_source.data.t,
@@ -248,6 +249,18 @@ def plot(sim, base=None, plot_pcc_voltage=True, plot_w=False, t_span=None):
             mdl.ac_source.data.t,
             np.imag(e_g/base.u),
             label=r"$e_\mathrm{gq}$",
+            ds="steps-post")
+        ax3.plot(
+            mdl.ac_filter.data.t,
+            np.real(u_g/base.u),
+            "--",
+            label=r"$u_\mathrm{gd}$",
+            ds="steps-post")
+        ax3.plot(
+            mdl.ac_filter.data.t,
+            np.imag(u_g/base.u),
+            "--",
+            label=r"$u_\mathrm{gq}$",
             ds="steps-post")
 
     elif hasattr(sim.ctrl, "observer"):

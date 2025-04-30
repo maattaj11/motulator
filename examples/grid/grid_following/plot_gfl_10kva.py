@@ -19,14 +19,15 @@ from motulator.grid.utils import (
 # %%
 # Compute base values based on the nominal values.
 
-nom = NominalValues(U=400, I=14.5, f=50, P=10e3)
+# nom = NominalValues(U=400, I=14.5, f=50, P=10e3)
+nom = NominalValues(U=400, I=18, f=50, P=12.5e3)
 base = BaseValues.from_nominal(nom)
 
 # %%
 # Configure the system model.
 
 # Filter and grid
-par = ACFilterPars(L_fc=.2*base.L)
+par = ACFilterPars(L_fc=.15*base.L)
 ac_filter = model.LFilter(par)
 ac_source = model.ThreePhaseVoltageSource(w_g=base.w, abs_e_g=base.u)
 # Inverter with constant DC voltage
@@ -40,15 +41,17 @@ mdl = model.GridConverterSystem(converter, ac_filter, ac_source)
 # Configure the control system.
 
 cfg = control.GridFollowingControlCfg(
-    L=.2*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i)
+    L=.15*base.L, nom_u=base.u, nom_w=base.w, max_i=1.5*base.i, T_s=1/4e3)
 ctrl = control.GridFollowingControl(cfg)
 
 # %%
 # Set the time-dependent reference and disturbance signals.
 
 # Set the active and reactive power references
-ctrl.ref.p_g = lambda t: (t > .02)*5e3
-ctrl.ref.q_g = lambda t: (t > .04)*4e3
+# ctrl.ref.p_g = lambda t: (t > .02)*5e3
+# ctrl.ref.q_g = lambda t: (t > .04)*4e3
+ctrl.ref.p_g = lambda t: (t > .02)*0.5*base.p
+ctrl.ref.q_g = lambda t: (t > .02)*0.5*base.p
 
 # Uncomment lines below to simulate an unbalanced fault (add negative sequence)
 # mdl.ac_source.par.abs_e_g = .75*base.u
@@ -59,7 +62,7 @@ ctrl.ref.q_g = lambda t: (t > .04)*4e3
 # Create the simulation object and simulate it.
 
 sim = model.Simulation(mdl, ctrl)
-sim.simulate(t_stop=.1)
+sim.simulate(t_stop=.1, T_eval=1/100e3)
 
 # %%
 # Plot the results.
@@ -69,4 +72,4 @@ sim.simulate(t_stop=.1)
 
 # Uncomment line below to plot locus of the grid voltage space vector
 # plot_voltage_vector(sim, base)
-plot(sim, base, plot_pcc_voltage=False)
+plot(sim, plot_pcc_voltage=False)
