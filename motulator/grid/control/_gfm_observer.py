@@ -154,8 +154,9 @@ class ObserverBasedGridFormingController:
         u_nom: float = sqrt(2 / 3) * 400,
         w_nom: float = 2 * pi * 50,
         T_s: float = 125e-6,
+        k_comp: float = 1.5,
     ) -> None:
-        self.pwm = PWM()
+        self.pwm = PWM(k_comp=k_comp)
         self.observer = Observer(u_nom=u_nom, w_nom=w_nom, L=L, R=R, alpha_o=alpha_o)
         self.current_limiter = CurrentLimiter(i_max)
         # Initialize gains

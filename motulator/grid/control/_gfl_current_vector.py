@@ -173,8 +173,9 @@ class CurrentVectorController:
         w_nom: float = 2 * pi * 50,
         alpha_pll: float = 2 * pi * 20,
         T_s: float = 125e-6,
+        k_comp: float = 1.5,
     ) -> None:
-        self.pwm = PWM()
+        self.pwm = PWM(k_comp=k_comp)
         self.current_ctrl = CurrentController(L, alpha_c, alpha_i)
         self.pll = PLL(u_nom, w_nom, alpha_pll)
         self.current_limiter = CurrentLimiter(i_max)
