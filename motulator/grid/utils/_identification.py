@@ -32,18 +32,20 @@ def setup_identification():
         # op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),  # GFL
         op_point=SimpleNamespace(p_g=0.5*base.p, v_c=base.u),  # Observer GFM
         abs_u_e=.01*base.u,
-        f_start=10,
-        f_stop=5e3,  # Nyquist freq: 1/(2*cfg.T_s)
+        f_start=1,
+        f_stop=10e3,
         n_freqs=100,
-        multiprocess=False,
+        multiprocess=True,
         spacing="log",
+        n_periods=4,
         T_s=1/10e3,
+        n_sol=10,
         delay=1,
         k_comp=1.5,
         plot_style=None,
         # filename=None)
-        filename="obs_f1-5k_n100log_p0.5_delay1_kcomp1.5")
-    # filename="gfl_f1-5k_n100log_p0.5_q0.5_delay1_kcomp1.5")
+        filename="obs_f1-10k_n100log_p0.5_delay1_nperiods4")
+    # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1_nsol10")
 
     # Configure the system model.
     # Filter and grid
@@ -68,7 +70,7 @@ def setup_identification():
     #     nom_u=base.u,
     #     nom_w=base.w,
     #     max_i=1.5*base.i,
-    #     T_s=1/4e3,
+    #     T_s=identification_cfg.T_s,
     #     k_comp=identification_cfg.k_comp)
     # ctrl = control.GridFollowingControl(cfg)
 
@@ -126,7 +128,7 @@ class AdmittanceIdentificationCfg:
         controller sampling period. The default is 10.
     n_periods : int, optional
         Number of excitation signal periods to use for calculating the DFT. The
-        default is 10.
+        default is 4.
     multiprocess : bool, optional
         If set to True, multiprocessing.Pool() is used to run the
         identification using parallel threads. The default is True.
@@ -158,7 +160,7 @@ class AdmittanceIdentificationCfg:
     t1: float = .02
     T_s: float = 1/10e3
     n_sol: int = 10
-    n_periods: int = 10
+    n_periods: int = 4
     multiprocess: bool = True
     plot_style: str = "re_im"
     filename: str = None
