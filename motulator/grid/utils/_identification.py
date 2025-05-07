@@ -29,23 +29,24 @@ def setup_identification():
 
     # Configure the identification
     identification_cfg = AdmittanceIdentificationCfg(
-        # op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),  # GFL
-        op_point=SimpleNamespace(p_g=0.5*base.p, v_c=base.u),  # Observer GFM
+        op_point=SimpleNamespace(p_g=.5*base.p, q_g=.5*base.p),  # GFL
+        # op_point=SimpleNamespace(p_g=0.5*base.p, v_c=base.u),  # Observer GFM
         abs_u_e=.01*base.u,
         f_start=1,
         f_stop=10e3,
-        n_freqs=100,
-        multiprocess=True,
+        n_freqs=20,
+        multiprocess=False,
         spacing="log",
         n_periods=4,
         T_s=1/10e3,
         n_sol=10,
-        delay=1,
-        k_comp=1.5,
+        delay=0,
+        k_comp=0.5,
         plot_style=None,
-        # filename=None)
-        filename="obs_f1-10k_n100log_p0.5_delay1_nperiods4")
-    # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1_nsol10")
+        # filename=None,
+        # filename="obs_f1-10k_n100log_p0.5_delay1_nperiods4",
+        # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1_nsol10",
+    )
 
     # Configure the system model.
     # Filter and grid
@@ -64,28 +65,28 @@ def setup_identification():
 
     # Configure the control system.
 
-    # # GFL
-    # cfg = control.GridFollowingControlCfg(
-    #     L=.15*base.L,
-    #     nom_u=base.u,
-    #     nom_w=base.w,
-    #     max_i=1.5*base.i,
-    #     T_s=identification_cfg.T_s,
-    #     k_comp=identification_cfg.k_comp)
-    # ctrl = control.GridFollowingControl(cfg)
-
-    # Observer GFM
-    cfg = control.ObserverBasedGridFormingControlCfg(
+    # GFL
+    cfg = control.GridFollowingControlCfg(
         L=.15*base.L,
         nom_u=base.u,
         nom_w=base.w,
-        max_i=1.3*base.i,
-        R_a=.2*base.Z,
-        k_v=1,
-        alpha_o=base.w,
+        max_i=1.5*base.i,
         T_s=identification_cfg.T_s,
         k_comp=identification_cfg.k_comp)
-    ctrl = control.ObserverBasedGridFormingControl(cfg)
+    ctrl = control.GridFollowingControl(cfg)
+
+    # # Observer GFM
+    # cfg = control.ObserverBasedGridFormingControlCfg(
+    #     L=.15*base.L,
+    #     nom_u=base.u,
+    #     nom_w=base.w,
+    #     max_i=1.3*base.i,
+    #     R_a=.2*base.Z,
+    #     k_v=1,
+    #     alpha_o=base.w,
+    #     T_s=identification_cfg.T_s,
+    #     k_comp=identification_cfg.k_comp)
+    # ctrl = control.ObserverBasedGridFormingControl(cfg)
 
     return identification_cfg, mdl, ctrl
 
@@ -211,7 +212,7 @@ def dft(cfg, u, f_e):
     """
 
     n = int(cfg.n_periods/(f_e*cfg.T_eval))
-    u = u[-n:]*blackman(n)
+    u = u[-n:]*blackman(n, False)
     y = 2/n*np.sum(u*np.exp(-2j*np.pi*f_e*cfg.T_eval*np.arange(n)))
     return y
 
@@ -289,6 +290,13 @@ def identify(cfg, sim_op, i, f_e):
         sim.mdl.ac_source.data.exp_j_theta_g)*sim.mdl.ac_filter.data.i_gs
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
+
+    # Print DFT coefficients for debugging
+    print(
+        f"f_e: {f_e:8.1f} u_gd1: {np.abs(u_gd1):5.2f} u_gq1: {np.abs(u_gq1):5.2f} "
+        + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f} " +
+        f"i_gd1: {np.abs(i_gd1):5.2f} i_gq1: {np.abs(i_gq1):5.2f} " +
+        f"i_gd2: {np.abs(i_gd2):5.2f} i_gq2: {np.abs(i_gq2):5.2f}")
 
     # Calculate the elements of the output admittance matrix
     I = np.array([[i_gd1, i_gd2], [i_gq1, i_gq2]])
