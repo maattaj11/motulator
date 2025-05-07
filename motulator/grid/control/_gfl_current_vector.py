@@ -125,6 +125,23 @@ class CurrentController(ComplexPIController):
 
 
 # %%
+class ProportionalCurrentController:
+    """P-type current controller with decoupling and PCC voltage feedforward"""
+
+    def __init__(self, L: float, alpha_c: float, w_nom: float) -> None:
+        self.k_p = alpha_c * L
+        self.w_g = w_nom
+        self.L = L
+
+    def compute_output(self, i_ref: complex, i: complex, u_ff: complex = 0j) -> complex:
+        u = self.k_p * (i_ref - i) + 1j * self.w_g * self.L * i + u_ff
+        return u
+
+    def update(self, *args) -> None:
+        pass
+
+
+# %%
 @dataclass
 class References:
     """Reference signals for grid-following control."""
@@ -176,7 +193,8 @@ class CurrentVectorController:
         k_comp: float = 1.5,
     ) -> None:
         self.pwm = PWM(k_comp=k_comp)
-        self.current_ctrl = CurrentController(L, alpha_c, alpha_i)
+        # self.current_ctrl = CurrentController(L, alpha_c, alpha_i)
+        self.current_ctrl = ProportionalCurrentController(L, alpha_c, w_nom)
         self.pll = PLL(u_nom, w_nom, alpha_pll)
         self.current_limiter = CurrentLimiter(i_max)
         self.T_s = T_s

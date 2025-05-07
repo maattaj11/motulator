@@ -33,18 +33,19 @@ def setup_identification() -> tuple[
         f_start=1,
         f_stop=10e3,
         n_freqs=100,
-        multiprocess=False,
+        multiprocess=True,
         spacing="log",
         n_periods=4,
         T_s=1 / 10e3,
         N_eval=10,
-        delay=1,
-        k_comp=1.5,
+        use_window=False,
+        delay=0,
+        k_comp=0.5,
+        # filename=None,
+        # filename="obs_f1-10k_n100log_p0.5_delay0",
+        filename="gfl_f1-10k_n100log_p0.5_q0.5_delay0_nowindow",
         plot_style=None,
-        # filename=None)
-        filename="obs_f1-10k_n100log_p0.5_delay1",
     )
-    # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1_nsol10")
 
     # Configure the system model.
     ac_filter = model.LFilter(L_f=0.15 * base.L)
@@ -58,28 +59,28 @@ def setup_identification() -> tuple[
 
     # Configure the control system.
 
-    # # GFL
-    # inner_ctrl = control.CurrentVectorController(
-    #     L=0.15 * base.L,
-    #     u_nom=base.u,
-    #     w_nom=base.w,
-    #     i_max=1.5 * base.i,
-    #     T_s=identification_cfg.T_s,
-    #     k_comp=identification_cfg.k_comp,
-    # )
-
-    # Observer GFM
-    inner_ctrl = control.ObserverBasedGridFormingController(
+    # GFL
+    inner_ctrl = control.CurrentVectorController(
         L=0.15 * base.L,
         u_nom=base.u,
         w_nom=base.w,
-        i_max=1.3 * base.i,
-        R_a=0.2 * base.Z,
-        k_v=1,
-        alpha_o=base.w,
+        i_max=1.5 * base.i,
         T_s=identification_cfg.T_s,
         k_comp=identification_cfg.k_comp,
     )
+
+    # # Observer GFM
+    # inner_ctrl = control.ObserverBasedGridFormingController(
+    #     L=0.15 * base.L,
+    #     u_nom=base.u,
+    #     w_nom=base.w,
+    #     i_max=1.3 * base.i,
+    #     R_a=0.2 * base.Z,
+    #     k_v=1,
+    #     alpha_o=base.w,
+    #     T_s=identification_cfg.T_s,
+    #     k_comp=identification_cfg.k_comp,
+    # )
 
     ctrl = control.GridConverterControlSystem(inner_ctrl)
 
@@ -142,6 +143,8 @@ class IdentificationCfg:
     k_comp : float, optional
         Compensation factor for the delay effect on the converter output
         voltage vector angle. The default is 1.5.
+    use_window : bool, optional
+        Whether to use window function for calculating DFT. Defaults to True.
 
     """
 
@@ -162,6 +165,7 @@ class IdentificationCfg:
     filename: str | None = None
     delay: int = 1
     k_comp: float = 1.5
+    use_window: bool = True
 
     def __post_init__(self) -> None:
         # Create array of frequencies if not specified
@@ -216,7 +220,10 @@ def dft(cfg: IdentificationCfg, u: np.ndarray, f_e: float) -> complex:
     """
 
     n = int(cfg.n_periods * cfg.N_eval / (f_e * cfg.T_s))
-    u = u[-n:] * blackman(n)
+    if cfg.use_window:
+        u = u[-n:] * blackman(n, False)
+    else:
+        u = u[-n:]
     y = (
         2
         / n
@@ -252,8 +259,7 @@ def pre_process(
 
     # Create Simulation object and simulate
     sim = model.Simulation(mdl, ctrl, show_progress=False)
-    res = sim.simulate(t_stop=cfg.t0)
-    utils.plot(res, None)
+    _ = sim.simulate(t_stop=cfg.t0)
     return sim
 
 
@@ -294,6 +300,12 @@ def identify(
     i_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.i_g_ab
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
+
+    # # Print DFT coefficients for debugging
+    # print(
+    #     f"f_e: {f_e:8.1f} u_gd1: {np.abs(u_gd1):5.2f} u_gq1: {np.abs(u_gq1):5.2f} "
+    #     + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f}"
+    # )
 
     # Calculate the elements of the output admittance matrix
     I = np.array([[i_gd1, i_gd2], [i_gq1, i_gq2]])  # noqa: E741
