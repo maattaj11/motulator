@@ -13,80 +13,7 @@ from scipy.io import savemat
 from scipy.signal.windows import blackman
 
 from motulator.common.utils import empty_array
-from motulator.grid import control, model, utils
-
-
-# %%
-def setup_identification() -> tuple[
-    "IdentificationCfg", model.GridConverterSystem, control.GridConverterControlSystem
-]:
-    """Configure the identification."""
-
-    # Compute base values based on the nominal values.
-    nom = utils.NominalValues(U=400, I=18, f=50, P=12.5e3)
-    base = utils.BaseValues.from_nominal(nom)
-
-    # Configure the identification
-    identification_cfg = IdentificationCfg(
-        ctrl_method="obs",
-        op_point={"p_g": -1.0 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
-        abs_u_e=0.01 * base.u,
-        f_start=1,
-        f_stop=10e3,
-        n_freqs=100,
-        multiprocess=True,
-        spacing="log",
-        n_periods=4,
-        T_s=1 / 10e3,
-        N_eval=10,
-        use_window=True,
-        delay=1,
-        k_comp=1.5,
-        # filename=None,
-        filename="obs_f1-10k_n100log_p-1.0_delay1",
-        # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1",
-        plot_style=None,
-    )
-
-    # Configure the system model.
-    ac_filter = model.LFilter(L_f=0.15 * base.L)
-    ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=base.w, e_g=base.u)
-    converter = model.VoltageSourceConverter(u_dc=650)
-
-    # Create system model
-    mdl = model.GridConverterSystem(
-        converter, ac_filter, ac_source, delay=identification_cfg.delay
-    )
-
-    # Configure the control system.
-
-    if identification_cfg.ctrl_method == "gfl":
-        inner_ctrl = control.CurrentVectorController(
-            L=0.15 * base.L,
-            u_nom=base.u,
-            w_nom=base.w,
-            i_max=1.5 * base.i,
-            T_s=identification_cfg.T_s,
-            k_comp=identification_cfg.k_comp,
-        )
-        ctrl = control.GridConverterControlSystem(inner_ctrl)
-    elif identification_cfg.ctrl_method == "obs":
-        inner_ctrl = control.ObserverBasedGridFormingController(
-            L=0.15 * base.L,
-            u_nom=base.u,
-            w_nom=base.w,
-            i_max=1.3 * base.i,
-            R_a=0.2 * base.Z,
-            k_v=1,
-            alpha_o=base.w,
-            T_s=identification_cfg.T_s,
-            k_comp=identification_cfg.k_comp,
-        )
-    else:
-        raise ValueError
-
-    ctrl = control.GridConverterControlSystem(inner_ctrl)
-    return identification_cfg, mdl, ctrl
+from motulator.grid import control, model
 
 
 # %%
@@ -97,10 +24,6 @@ class IdentificationCfg:
 
     Parameters
     ----------
-    ctrl_method : Literal["gfl", "obs"]
-        Control method to be used. Valid options are:
-        - "gfl": Grid-following control
-        - "obs": Disturbance observer-based grid-forming control
     op_point : dict[str, float]
         Dictionary object containing the reference signals in the operating point.
     abs_u_e : float
@@ -135,10 +58,6 @@ class IdentificationCfg:
     multiprocess : bool, optional
         If set to True, multiprocessing.Pool() is used to run the
         identification using parallel threads. The default is True.
-    plot_style : str, optional
-        Set this variable to plot either the real and imaginary parts of the
-        admittance ("re_im") or the magnitude and phase ("bode"). Can also be
-        set to None to disable plotting. The default is "re_im".
     filename : str, optional
         If given, the identification result is saved in
         */matfiles/{date}_{time}_{filename}.mat where * is the project
@@ -154,7 +73,6 @@ class IdentificationCfg:
 
     """
 
-    ctrl_method: Literal["gfl", "obs"]
     op_point: dict[str, float]
     abs_u_e: float
     f_start: float
@@ -168,7 +86,6 @@ class IdentificationCfg:
     N_eval: int = 10
     n_periods: int = 4
     multiprocess: bool = True
-    plot_style: str | None = "re_im"
     filename: str | None = None
     delay: int = 1
     k_comp: float = 1.5
@@ -342,18 +259,29 @@ def post_process(results: list[list[Any]]) -> IdentificationResults:
     return res
 
 
-def run_identification() -> None:
-    """Entrypoint for running the identification."""
-    cfg, mdl, ctrl = setup_identification()
+# %%
+def run_identification(
+    cfg: IdentificationCfg,
+    mdl: model.GridConverterSystem,
+    ctrl: control.GridConverterControlSystem,
+) -> IdentificationResults:
+    """Run the identification."""
     results = []
     sim_op = pre_process(cfg, mdl, ctrl)
     t_start = time()
+    print("Start identification...")
 
-    def custom_error_callback(error):
-        print(f"Error during multiprocessing: {str(error)}")
+    index = 1
+    freqs = np.size(cfg.freqs)
 
-    def collect_result(result):
+    def collect_result(result: list[Any]) -> None:
+        nonlocal index
         results.append(result)
+        print(f"\rFrequencies simulated: {index}/{freqs}", end="")
+        index += 1
+
+    def custom_error_callback(error: Any) -> None:
+        print(f"Error during multiprocessing: {str(error)}")
 
     if cfg.multiprocess:
         # Create the multiprocessing pool using all available CPUs
@@ -377,14 +305,25 @@ def run_identification() -> None:
             result = identify(cfg, sim_op, i=i, f_e=f_e)
             collect_result(result)
 
-    print(f"Execution time: {(time() - t_start):.2f} s")
+    print(f"\nExecution time: {(time() - t_start):.2f} s")
     data = post_process(results)
     if cfg.filename is not None:
         save_mat(data, cfg.filename)
-    # if cfg.plot_style is not None:
-    #     plot_identification(data, cfg.plot_style)
+
+    return data
 
 
-if __name__ == "__main__":
-    # Run the identification
-    run_identification()
+def plot_identification(plot_style: Literal["bode", "re_im"] | None = "re_im") -> None:
+    """
+    Plot the identification results
+
+    Parameters
+    ----------
+    plot_style : Literal["bode", "re_im"], optional
+        Controls plotting of identification results, defaults to "re_im". Options are:
+        - "bode": plot magnitude and phase of output admittance
+        - "re_im": plot real and imaginary parts of output admittance
+
+    """
+
+    raise NotImplementedError
