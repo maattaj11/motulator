@@ -87,10 +87,12 @@ class Observer:
 
         return out
 
-    def update(self, T_s: float, out: ObserverOutputs) -> None:
+    def update(self, ref: "References", out: ObserverOutputs) -> None:
         """Update the states."""
-        self.state.u_gp += T_s * self.alpha_o * (out.u_c - out.v_c - self.R * out.i_c)
-        self.state.theta_c += T_s * self.w_g
+        self.state.u_gp += (
+            ref.T_s * self.alpha_o * (ref.u_c - out.v_c - self.R * out.i_c)
+        )
+        self.state.theta_c += ref.T_s * self.w_g
         self.state.theta_c = wrap(self.state.theta_c)
 
 
@@ -200,7 +202,7 @@ class ObserverBasedGridFormingController:
 
     def update(self, ref: References, fbk: ObserverOutputs) -> None:
         """Update states."""
-        self.observer.update(ref.T_s, fbk)
+        self.observer.update(ref, fbk)
 
     def post_process(self, ts: TimeSeries) -> None:
         """Post-process controller time series."""

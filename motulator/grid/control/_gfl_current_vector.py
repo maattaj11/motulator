@@ -198,6 +198,7 @@ class CurrentVectorController:
         self.pll = PLL(u_nom, w_nom, alpha_pll)
         self.current_limiter = CurrentLimiter(i_max)
         self.T_s = T_s
+        self.u_nom = u_nom
 
     def get_feedback(self, meas: Measurements) -> PLLOutputSignals:
         """Get feedback signals."""
@@ -213,7 +214,8 @@ class CurrentVectorController:
         ref = References(T_s=self.T_s, p_g=p_g_ref, q_g=q_g_ref)
 
         # Compute the reference current
-        ref.i_c = (ref.p_g - 1j * ref.q_g) / (1.5 * fbk.u_g)
+        # ref.i_c = (ref.p_g - 1j * ref.q_g) / (1.5 * fbk.u_g)
+        ref.i_c = (ref.p_g - 1j * ref.q_g) / (1.5 * self.u_nom)
         ref.i_c = self.current_limiter(ref.i_c)
 
         # Compute the reference voltage

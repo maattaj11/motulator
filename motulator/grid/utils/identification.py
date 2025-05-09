@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from os.path import join
 from time import time
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from scipy.io import savemat
@@ -28,7 +28,8 @@ def setup_identification() -> tuple[
 
     # Configure the identification
     identification_cfg = IdentificationCfg(
-        op_point={"p_g": 0.5 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
+        ctrl_method="obs",
+        op_point={"p_g": -1.0 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
         abs_u_e=0.01 * base.u,
         f_start=1,
         f_stop=10e3,
@@ -38,12 +39,12 @@ def setup_identification() -> tuple[
         n_periods=4,
         T_s=1 / 10e3,
         N_eval=10,
-        use_window=False,
-        delay=0,
-        k_comp=0.5,
+        use_window=True,
+        delay=1,
+        k_comp=1.5,
         # filename=None,
-        # filename="obs_f1-10k_n100log_p0.5_delay0",
-        filename="gfl_f1-10k_n100log_p0.5_q0.5_delay0_nowindow",
+        filename="obs_f1-10k_n100log_p-1.0_delay1",
+        # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1",
         plot_style=None,
     )
 
@@ -59,31 +60,32 @@ def setup_identification() -> tuple[
 
     # Configure the control system.
 
-    # GFL
-    inner_ctrl = control.CurrentVectorController(
-        L=0.15 * base.L,
-        u_nom=base.u,
-        w_nom=base.w,
-        i_max=1.5 * base.i,
-        T_s=identification_cfg.T_s,
-        k_comp=identification_cfg.k_comp,
-    )
-
-    # # Observer GFM
-    # inner_ctrl = control.ObserverBasedGridFormingController(
-    #     L=0.15 * base.L,
-    #     u_nom=base.u,
-    #     w_nom=base.w,
-    #     i_max=1.3 * base.i,
-    #     R_a=0.2 * base.Z,
-    #     k_v=1,
-    #     alpha_o=base.w,
-    #     T_s=identification_cfg.T_s,
-    #     k_comp=identification_cfg.k_comp,
-    # )
+    if identification_cfg.ctrl_method == "gfl":
+        inner_ctrl = control.CurrentVectorController(
+            L=0.15 * base.L,
+            u_nom=base.u,
+            w_nom=base.w,
+            i_max=1.5 * base.i,
+            T_s=identification_cfg.T_s,
+            k_comp=identification_cfg.k_comp,
+        )
+        ctrl = control.GridConverterControlSystem(inner_ctrl)
+    elif identification_cfg.ctrl_method == "obs":
+        inner_ctrl = control.ObserverBasedGridFormingController(
+            L=0.15 * base.L,
+            u_nom=base.u,
+            w_nom=base.w,
+            i_max=1.3 * base.i,
+            R_a=0.2 * base.Z,
+            k_v=1,
+            alpha_o=base.w,
+            T_s=identification_cfg.T_s,
+            k_comp=identification_cfg.k_comp,
+        )
+    else:
+        raise ValueError
 
     ctrl = control.GridConverterControlSystem(inner_ctrl)
-
     return identification_cfg, mdl, ctrl
 
 
@@ -95,6 +97,10 @@ class IdentificationCfg:
 
     Parameters
     ----------
+    ctrl_method : Literal["gfl", "obs"]
+        Control method to be used. Valid options are:
+        - "gfl": Grid-following control
+        - "obs": Disturbance observer-based grid-forming control
     op_point : dict[str, float]
         Dictionary object containing the reference signals in the operating point.
     abs_u_e : float
@@ -148,6 +154,7 @@ class IdentificationCfg:
 
     """
 
+    ctrl_method: Literal["gfl", "obs"]
     op_point: dict[str, float]
     abs_u_e: float
     f_start: float
@@ -220,10 +227,7 @@ def dft(cfg: IdentificationCfg, u: np.ndarray, f_e: float) -> complex:
     """
 
     n = int(cfg.n_periods * cfg.N_eval / (f_e * cfg.T_s))
-    if cfg.use_window:
-        u = u[-n:] * blackman(n, False)
-    else:
-        u = u[-n:]
+    u = u[-n:] * blackman(n, False) if cfg.use_window else u[-n:]
     y = (
         2
         / n
@@ -259,7 +263,8 @@ def pre_process(
 
     # Create Simulation object and simulate
     sim = model.Simulation(mdl, ctrl, show_progress=False)
-    _ = sim.simulate(t_stop=cfg.t0)
+    res = sim.simulate(t_stop=cfg.t0)
+    # utils.plot(res, base=None)
     return sim
 
 
@@ -276,6 +281,7 @@ def identify(
     t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
     res_d = sim_d.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
+    # utils.plot(res_d, base=None)
 
     # Transform the voltage and current to synchronous coordinates and
     # calculate the DFT
@@ -292,6 +298,7 @@ def identify(
     mdl.ac_source.u_eq = cfg.amplitudes[i]
     sim_q = model.Simulation(mdl, ctrl, show_progress=False)
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
+    # utils.plot(res_q, base=None)
 
     # DFT
     u_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.u_g_ab
@@ -304,7 +311,9 @@ def identify(
     # # Print DFT coefficients for debugging
     # print(
     #     f"f_e: {f_e:8.1f} u_gd1: {np.abs(u_gd1):5.2f} u_gq1: {np.abs(u_gq1):5.2f} "
-    #     + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f}"
+    #     + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f} "
+    #     + f"i_gd1: {np.abs(i_gd1):5.2f} i_gq1: {np.abs(i_gq1):5.2f} "
+    #     + f"i_gd2: {np.abs(i_gd2):5.2f} i_gq2: {np.abs(i_gq2):5.2f}"
     # )
 
     # Calculate the elements of the output admittance matrix
