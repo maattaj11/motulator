@@ -3,7 +3,11 @@
 from typing import Any
 
 from motulator.grid import control, model, utils
-from motulator.grid.utils._identification import IdentificationCfg, run_identification
+from motulator.grid.utils._identification import (
+    IdentificationCfg,
+    plot_identification,  # noqa: F401
+    run_identification,
+)
 
 
 # %%
@@ -25,7 +29,7 @@ def setup_parameter_sweep() -> Any:
 
 # %%
 def setup_identification() -> tuple[
-    "IdentificationCfg", model.GridConverterSystem, control.GridConverterControlSystem
+    IdentificationCfg, model.GridConverterSystem, control.GridConverterControlSystem
 ]:
     """Configure the identification."""
 
@@ -37,20 +41,17 @@ def setup_identification() -> tuple[
     identification_cfg = IdentificationCfg(
         op_point={"p_g": 0.5 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
         abs_u_e=0.01 * base.u,
-        f_start=1,
+        f_start=10,
         f_stop=10e3,
-        n_freqs=100,
+        n_freqs=50,
         multiprocess=True,
-        spacing="log",
-        n_periods=4,
         T_s=1 / 10e3,
-        N_eval=10,
-        use_window=True,
         delay=1,
         k_comp=1.5,
         # filename=None,
-        filename="obs_f1-10k_n100log_p0.5_delay1_refactor",
-        # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1",
+        # filename="obs_f1-10k_n100log_p0.5_delay1_Lf0.30",
+        # filename="gfl_f10-10k_n10log_p0.5_q0.5_delay1_test",
+        filetype="csv",
     )
 
     # Configure the system model.
@@ -65,28 +66,28 @@ def setup_identification() -> tuple[
 
     # Configure the control system.
 
-    # # GFL
-    # inner_ctrl = control.CurrentVectorController(
-    #     L=0.15 * base.L,
-    #     u_nom=base.u,
-    #     w_nom=base.w,
-    #     i_max=1.5 * base.i,
-    #     T_s=identification_cfg.T_s,
-    #     k_comp=identification_cfg.k_comp,
-    # )
-
-    # Observer GFM
-    inner_ctrl = control.ObserverBasedGridFormingController(
+    # GFL
+    inner_ctrl = control.CurrentVectorController(
         L=0.15 * base.L,
         u_nom=base.u,
         w_nom=base.w,
-        i_max=1.3 * base.i,
-        R_a=0.2 * base.Z,
-        k_v=1,
-        alpha_o=base.w,
+        i_max=1.5 * base.i,
         T_s=identification_cfg.T_s,
         k_comp=identification_cfg.k_comp,
     )
+
+    # # Observer GFM
+    # inner_ctrl = control.ObserverBasedGridFormingController(
+    #     L=0.15 * base.L,
+    #     u_nom=base.u,
+    #     w_nom=base.w,
+    #     i_max=1.3 * base.i,
+    #     R_a=0.2 * base.Z,
+    #     k_v=1,
+    #     alpha_o=base.w,
+    #     T_s=identification_cfg.T_s,
+    #     k_comp=identification_cfg.k_comp,
+    # )
 
     ctrl = control.GridConverterControlSystem(inner_ctrl)
     return identification_cfg, mdl, ctrl
@@ -97,3 +98,4 @@ if __name__ == "__main__":
     # Run the identification
     cfg, mdl, ctrl = setup_identification()
     res = run_identification(cfg, mdl, ctrl)
+    plot_identification(res, plot_style="re_im")

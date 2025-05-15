@@ -8,12 +8,13 @@ from os.path import join
 from time import time
 from typing import Any, Literal
 
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.io import savemat
 from scipy.signal.windows import blackman
 
-from motulator.common.utils import empty_array
-from motulator.grid import control, model
+from motulator.common.utils._utils import empty_array, set_latex_style, set_screen_style
+from motulator.grid import control, model, utils  # noqa: F401
 
 
 # %%
@@ -58,10 +59,15 @@ class IdentificationCfg:
     multiprocess : bool, optional
         If set to True, multiprocessing.Pool() is used to run the
         identification using parallel threads. The default is True.
-    filename : str, optional
-        If given, the identification result is saved in
-        */matfiles/{date}_{time}_{filename}.mat where * is the project
-        root directory. The default is None.
+    filename : str | None, optional
+        If given, the identification result is saved in */data/{date}_{time}_{filename}
+        where * is the project root directory, defaults to None. The file format is set
+        by the `filetype` parameter.
+    filetype : Literal["csv", "mat"], optional
+        Choose the filetype for saving identification results, defaults to "csv". Valid
+        options are:
+        - "csv": save results in .csv-format, requires `pandas` to be installed
+        - "mat": save results in MATLAB .mat-format using scipy.io
     delay : int, optional
         Number of samples for modeling the computational delay. The default
         is 1.
@@ -75,9 +81,9 @@ class IdentificationCfg:
 
     op_point: dict[str, float]
     abs_u_e: float
-    f_start: float
-    f_stop: float
-    n_freqs: int
+    f_start: float = 1
+    f_stop: float = 10e3
+    n_freqs: int = 100
     spacing: str = "log"
     manual_freqs: np.ndarray | None = None
     t0: float = 0.1
@@ -87,6 +93,7 @@ class IdentificationCfg:
     n_periods: int = 4
     multiprocess: bool = True
     filename: str | None = None
+    filetype: Literal["csv", "mat"] = "csv"
     delay: int = 1
     k_comp: float = 1.5
     use_window: bool = True
@@ -118,6 +125,26 @@ class IdentificationResults:
 # %%
 
 
+def save_csv(data: IdentificationResults, filename: str) -> None:
+    """Save the identification results in a .csv-file."""
+
+    try:
+        from pandas import DataFrame
+
+        # Create the file path
+        timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
+        filepath = join("data", timestamp + filename + ".csv")
+
+        # Transform data into pandas DataFrame object
+        df = DataFrame(dict(data.__dict__.items()))
+
+        df.to_csv(filepath)
+        print(f"Data successfully exported to {timestamp + filename}")
+
+    except Exception as error:
+        print(f"Error saving data: {str(error)}")
+
+
 def save_mat(data: IdentificationResults, filename: str) -> None:
     """Save the identification results in a .mat-file."""
 
@@ -125,7 +152,7 @@ def save_mat(data: IdentificationResults, filename: str) -> None:
     data_dict = dict(data.__dict__.items())
     # Create the file path
     timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
-    filepath = join("matfiles", timestamp + filename + ".mat")
+    filepath = join("data", timestamp + filename + ".mat")
 
     try:
         savemat(filepath, data_dict)
@@ -308,22 +335,140 @@ def run_identification(
     print(f"\nExecution time: {(time() - t_start):.2f} s")
     data = post_process(results)
     if cfg.filename is not None:
-        save_mat(data, cfg.filename)
+        if cfg.filetype == "csv":
+            save_csv(data, cfg.filename)
+        elif cfg.filetype == "mat":
+            save_mat(data, cfg.filename)
 
     return data
 
 
-def plot_identification(plot_style: Literal["bode", "re_im"] | None = "re_im") -> None:
+# %%
+def plot_identification(
+    res: IdentificationResults,
+    plot_style: Literal["bode", "re_im"] = "re_im",
+    plot_passivity_index: bool = True,
+    latex: bool = False,
+) -> None:
     """
     Plot the identification results
 
     Parameters
     ----------
+    res : IdentificationResults
+        Should contain the results from the identification.
     plot_style : Literal["bode", "re_im"], optional
-        Controls plotting of identification results, defaults to "re_im". Options are:
+        Style for plotting of identification results, defaults to "re_im". Options are:
         - "bode": plot magnitude and phase of output admittance
         - "re_im": plot real and imaginary parts of output admittance
+    plot_passivity_index : bool, optional
+        Plot input feedforward passivity index calculated from the identification
+        results, defaults to True.
+    latex : bool, optional
+        Use latex for plots, defaults to False.
 
     """
+    # ruff: noqa: PLR0915
+    if latex:
+        set_latex_style()
+    else:
+        set_screen_style()
 
-    raise NotImplementedError
+    # First figure: elements of output admittance matrix
+    if plot_style == "bode":
+        fig, ((ax1, ax5), (ax2, ax6), (ax3, ax7), (ax4, ax8)) = plt.subplots(
+            4, 2, sharey="row"
+        )
+
+        ax1.semilogx(res.f_e, np.abs(res.Y_dd))
+        ax2.semilogx(
+            res.f_e, np.unwrap(np.angle(res.Y_dd, deg=True), discont=180, period=360)
+        )
+        ax3.semilogx(res.f_e, np.abs(res.Y_dq))
+        ax4.semilogx(
+            res.f_e, np.unwrap(np.angle(res.Y_dq, deg=True), discont=180, period=360)
+        )
+        ax5.semilogx(res.f_e, np.abs(res.Y_qd))
+        ax6.semilogx(
+            res.f_e, np.unwrap(np.angle(res.Y_qd, deg=True), discont=180, period=360)
+        )
+        ax7.semilogx(res.f_e, np.abs(res.Y_qq))
+        ax8.semilogx(
+            res.f_e, np.unwrap(np.angle(res.Y_qq, deg=True), discont=180, period=360)
+        )
+
+        ax1.set_ylabel(r"$|Y_\mathrm{dd}|\ (\mathrm{S})$")
+        ax2.set_ylabel(r"$\angle Y_\mathrm{dd}\ (\mathrm{deg})$")
+        ax3.set_ylabel(r"$|Y_\mathrm{dq}|\ (\mathrm{S})$")
+        ax4.set_ylabel(r"$\angle Y_\mathrm{dq}\ (\mathrm{deg})$")
+        ax5.set_ylabel(r"$|Y_\mathrm{qd}|\ (\mathrm{S})$")
+        ax6.set_ylabel(r"$\angle Y_\mathrm{qd}\ (\mathrm{deg})$")
+        ax7.set_ylabel(r"$|Y_\mathrm{qq}|\ (\mathrm{S})$")
+        ax8.set_ylabel(r"$\angle Y_\mathrm{qq}\ (\mathrm{deg})$")
+
+        ax5.tick_params(axis="y", labelleft=True)
+        ax6.tick_params(axis="y", labelleft=True)
+        ax7.tick_params(axis="y", labelleft=True)
+        ax8.tick_params(axis="y", labelleft=True)
+
+        ymin1, ymax1 = ax1.get_ylim()
+        ymin2, ymax2 = ax2.get_ylim()
+        ymin3, ymax3 = ax3.get_ylim()
+        ymin4, ymax4 = ax4.get_ylim()
+
+        ylim_magn = (min(ymin1, ymin3), max(ymax1, ymax3))
+        ax1.set_ylim(ylim_magn)
+        ax3.set_ylim(ylim_magn)
+
+        ylim_phase = (min(ymin2, ymin4), max(ymax2, ymax4))
+        ax2.set_ylim(ylim_phase)
+        ax4.set_ylim(ylim_phase)
+
+    else:
+        fig, ((ax1, ax5), (ax2, ax6), (ax3, ax7), (ax4, ax8)) = plt.subplots(
+            4, 2, sharex=True, sharey=True
+        )
+
+        ax1.semilogx(res.f_e, np.real(res.Y_dd))
+        ax2.semilogx(res.f_e, np.imag(res.Y_dd))
+        ax3.semilogx(res.f_e, np.real(res.Y_dq))
+        ax4.semilogx(res.f_e, np.imag(res.Y_dq))
+        ax5.semilogx(res.f_e, np.real(res.Y_qd))
+        ax6.semilogx(res.f_e, np.imag(res.Y_qd))
+        ax7.semilogx(res.f_e, np.real(res.Y_qq))
+        ax8.semilogx(res.f_e, np.imag(res.Y_qq))
+
+        ax1.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dd}\}\ (\mathrm{S})$")
+        ax2.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{dd}\}\ (\mathrm{S})$")
+        ax3.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{dq}\}\ (\mathrm{S})$")
+        ax4.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{dq}\}\ (\mathrm{S})$")
+        ax5.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qd}\}\ (\mathrm{S})$")
+        ax6.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{qd}\}\ (\mathrm{S})$")
+        ax7.set_ylabel(r"$\mathrm{Re}\{Y_\mathrm{qq}\}\ (\mathrm{S})$")
+        ax8.set_ylabel(r"$\mathrm{Im}\{Y_\mathrm{qq}\}\ (\mathrm{S})$")
+
+        ax5.tick_params(axis="y", labelleft=True)
+        ax6.tick_params(axis="y", labelleft=True)
+        ax7.tick_params(axis="y", labelleft=True)
+        ax8.tick_params(axis="y", labelleft=True)
+
+    ax4.set_xlabel(r"Frequency (Hz)")
+    ax8.set_xlabel(r"Frequency (Hz)")
+
+    fig.align_ylabels()
+    plt.show()
+
+    # Second figure: passivity index
+    if plot_passivity_index:
+        _, ax1 = plt.subplots(1, 1, figsize=(4, 3))
+
+        Y_c = np.array([[res.Y_dd, res.Y_qd], [res.Y_dq, res.Y_qq]])
+        Y_c = np.moveaxis(Y_c, -1, 0)
+        v_F = 0.5 * np.min(np.linalg.eigvals(Y_c + np.matrix_transpose(Y_c.conj())), 1)
+
+        ax1.axhline(0, linestyle="--", color="k", linewidth="1")
+        ax1.semilogx(res.f_e, v_F.real)
+        ax1.set_xlabel("Frequency (Hz)")
+        ax1.set_ylabel("Passivity index")
+
+        plt.show()
