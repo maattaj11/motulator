@@ -1,9 +1,10 @@
 """Functions and classes for converter output admittance identification."""
 
-import copy
 import multiprocessing as mp
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from os import makedirs
 from os.path import join
 from time import time
 from typing import Any, Literal
@@ -131,6 +132,9 @@ def save_csv(data: IdentificationResults, filename: str) -> None:
     try:
         from pandas import DataFrame
 
+        # Create the data directory if it doesn't exist
+        makedirs("data", exist_ok=True)
+
         # Create the file path
         timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
         filepath = join("data", timestamp + filename + ".csv")
@@ -148,15 +152,19 @@ def save_csv(data: IdentificationResults, filename: str) -> None:
 def save_mat(data: IdentificationResults, filename: str) -> None:
     """Save the identification results in a .mat-file."""
 
-    # Convert the data class to dict
-    data_dict = dict(data.__dict__.items())
-    # Create the file path
-    timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
-    filepath = join("data", timestamp + filename + ".mat")
-
     try:
+        # Create the data directory if it doesn't exist
+        makedirs("data", exist_ok=True)
+
+        # Convert the data class to dict
+        data_dict = dict(data.__dict__.items())
+        # Create the file path
+        timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
+        filepath = join("data", timestamp + filename + ".mat")
+
         savemat(filepath, data_dict)
         print(f"Data successfully exported to {timestamp + filename}")
+
     except Exception as error:
         print(f"Error saving data: {str(error)}")
 
@@ -183,8 +191,8 @@ def dft(cfg: IdentificationCfg, u: np.ndarray, f_e: float) -> complex:
 def copy_state(sim: model.Simulation) -> tuple[Any, Any]:
     """Make a copy of the simulation state."""
 
-    mdl = copy.deepcopy(sim.mdl)
-    ctrl = copy.deepcopy(sim.ctrl)
+    mdl = deepcopy(sim.mdl)
+    ctrl = deepcopy(sim.ctrl)
     return mdl, ctrl
 
 

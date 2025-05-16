@@ -41,16 +41,16 @@ def setup_identification() -> tuple[
     identification_cfg = IdentificationCfg(
         op_point={"p_g": 0.5 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
         abs_u_e=0.01 * base.u,
-        f_start=10,
+        f_start=1,
         f_stop=10e3,
-        n_freqs=50,
+        n_freqs=100,
         multiprocess=True,
         T_s=1 / 10e3,
         delay=1,
         k_comp=1.5,
         # filename=None,
-        # filename="obs_f1-10k_n100log_p0.5_delay1_Lf0.30",
-        # filename="gfl_f10-10k_n10log_p0.5_q0.5_delay1_test",
+        # filename="obs_f1-10k_n100log_p0.5_delay1",
+        filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1",
         filetype="csv",
     )
 
