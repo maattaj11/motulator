@@ -26,8 +26,13 @@ class IdentificationCfg:
 
     Parameters
     ----------
-    op_point : dict[str, float]
-        Dictionary object containing the reference signals in the operating point.
+    op_point : dict[Literal["p_g", "q_g", "v_c", "u_dc"], float]
+        Dictionary object containing key-value pairs for reference signals in the
+        operating point. Valid options for the dictionary keys are:
+        - "p_g"
+        - "q_g"
+        - "v_c"
+        - "u_dc"
     abs_u_e : float
         Magnitude of the voltage excitation (V).
     f_start : float
@@ -68,7 +73,7 @@ class IdentificationCfg:
         Choose the filetype for saving identification results, defaults to "csv". Valid
         options are:
         - "csv": save results in .csv-format, requires `pandas` to be installed
-        - "mat": save results in MATLAB .mat-format using scipy.io
+        - "mat": save results in MATLAB .mat-format
     delay : int, optional
         Number of samples for modeling the computational delay. The default
         is 1.
@@ -80,7 +85,7 @@ class IdentificationCfg:
 
     """
 
-    op_point: dict[str, float]
+    op_point: dict[Literal["p_g", "q_g", "v_c", "u_dc"], float]
     abs_u_e: float
     f_start: float = 1
     f_stop: float = 10e3
@@ -114,13 +119,25 @@ class IdentificationCfg:
 
 @dataclass
 class IdentificationResults:
-    """Container for identification results"""
+    """
+    Container for identification results.
+
+    Contains fields for excitation signal frequency `f_e`, elements of the output
+    admittance matrix `[Y_dd, Y_qd; Y_dq, Y_qq]`, operating point grid current vector
+    `i_g0` (in synchronous coordinates aligned with the grid voltage), grid voltage
+    magnitude `e_g0`, converter output filter impedance `Z_f`, and grid impedance `Z_g`.
+
+    """
 
     f_e: np.ndarray = field(default_factory=empty_array)
     Y_dd: np.ndarray = field(default_factory=empty_array)
     Y_qd: np.ndarray = field(default_factory=empty_array)
     Y_dq: np.ndarray = field(default_factory=empty_array)
     Y_qq: np.ndarray = field(default_factory=empty_array)
+    i_g0: complex = 0j
+    e_g0: float = 0
+    Z_f: complex = 0j
+    Z_g: complex = 0j
 
 
 # %%
@@ -200,7 +217,7 @@ def pre_process(
     cfg: IdentificationCfg,
     mdl: model.GridConverterSystem,
     ctrl: control.GridConverterControlSystem,
-) -> model.Simulation:
+) -> tuple[model.Simulation, list[Any]]:
     """Simulate the system to the desired operating point."""
 
     # Set appropriate references
@@ -217,7 +234,18 @@ def pre_process(
     sim = model.Simulation(mdl, ctrl, show_progress=False)
     res = sim.simulate(t_stop=cfg.t0)
     # utils.plot(res, base=None)
-    return sim
+
+    # Calculate operating point
+    exp_j_theta_g0 = res.mdl.ac_source.exp_j_theta_g[-1]
+    i_g0 = res.mdl.ac_filter.i_g_ab[-1] * np.conj(exp_j_theta_g0)
+    e_g0 = res.mdl.ac_filter.e_g_ab[-1] * np.conj(exp_j_theta_g0)
+    u_g0 = res.mdl.ac_filter.u_g_ab[-1] * np.conj(exp_j_theta_g0)
+    u_c0 = res.mdl.ac_filter.u_c_ab[-1] * np.conj(exp_j_theta_g0)
+    Z_f = (u_c0 - u_g0) / i_g0
+    Z_g = (u_g0 - e_g0) / i_g0
+    operating_point = [i_g0, e_g0, Z_f, Z_g]
+
+    return sim, operating_point
 
 
 def identify(
@@ -281,8 +309,10 @@ def identify(
     return [i, f_e, Y_dd, Y_qd, Y_dq, Y_qq]
 
 
-def post_process(results: list[list[Any]]) -> IdentificationResults:
-    """Transform the results to ndarray format."""
+def post_process(
+    results: list[list[Any]], operating_point: list[Any]
+) -> IdentificationResults:
+    """Save the identification results and information about the operating point."""
     results_array = np.vstack(results)
     res = IdentificationResults(
         f_e=np.real(results_array[:, 1]),
@@ -290,6 +320,10 @@ def post_process(results: list[list[Any]]) -> IdentificationResults:
         Y_qd=results_array[:, 3],
         Y_dq=results_array[:, 4],
         Y_qq=results_array[:, 5],
+        i_g0=operating_point[0],
+        e_g0=operating_point[1],
+        Z_f=operating_point[2],
+        Z_g=operating_point[3],
     )
     return res
 
@@ -302,7 +336,7 @@ def run_identification(
 ) -> IdentificationResults:
     """Run the identification."""
     results = []
-    sim_op = pre_process(cfg, mdl, ctrl)
+    sim_op, operating_point = pre_process(cfg, mdl, ctrl)
     t_start = time()
     print("Start identification...")
 
@@ -341,7 +375,7 @@ def run_identification(
             collect_result(result)
 
     print(f"\nExecution time: {(time() - t_start):.2f} s")
-    data = post_process(results)
+    data = post_process(results, operating_point)
     if cfg.filename is not None:
         if cfg.filetype == "csv":
             save_csv(data, cfg.filename)
@@ -367,7 +401,7 @@ def plot_identification(
         Should contain the results from the identification.
     plot_style : Literal["bode", "re_im"], optional
         Style for plotting of identification results, defaults to "re_im". Options are:
-        - "bode": plot magnitude and phase of output admittance
+        - "bode": plot magnitude (in dB) and phase (in degrees) of output admittance
         - "re_im": plot real and imaginary parts of output admittance
     plot_passivity_index : bool, optional
         Plot input feedforward passivity index calculated from the identification
@@ -388,30 +422,30 @@ def plot_identification(
             4, 2, sharey="row"
         )
 
-        ax1.semilogx(res.f_e, np.abs(res.Y_dd))
+        ax1.semilogx(res.f_e, 20 * np.log10(np.abs(res.Y_dd)))
         ax2.semilogx(
             res.f_e, np.unwrap(np.angle(res.Y_dd, deg=True), discont=180, period=360)
         )
-        ax3.semilogx(res.f_e, np.abs(res.Y_dq))
+        ax3.semilogx(res.f_e, 20 * np.log10(np.abs(res.Y_dq)))
         ax4.semilogx(
             res.f_e, np.unwrap(np.angle(res.Y_dq, deg=True), discont=180, period=360)
         )
-        ax5.semilogx(res.f_e, np.abs(res.Y_qd))
+        ax5.semilogx(res.f_e, 20 * np.log10(np.abs(res.Y_qd)))
         ax6.semilogx(
             res.f_e, np.unwrap(np.angle(res.Y_qd, deg=True), discont=180, period=360)
         )
-        ax7.semilogx(res.f_e, np.abs(res.Y_qq))
+        ax7.semilogx(res.f_e, 20 * np.log10(np.abs(res.Y_qq)))
         ax8.semilogx(
             res.f_e, np.unwrap(np.angle(res.Y_qq, deg=True), discont=180, period=360)
         )
 
-        ax1.set_ylabel(r"$|Y_\mathrm{dd}|\ (\mathrm{S})$")
+        ax1.set_ylabel(r"$|Y_\mathrm{dd}|\ (\mathrm{dB})$")
         ax2.set_ylabel(r"$\angle Y_\mathrm{dd}\ (\mathrm{deg})$")
-        ax3.set_ylabel(r"$|Y_\mathrm{dq}|\ (\mathrm{S})$")
+        ax3.set_ylabel(r"$|Y_\mathrm{dq}|\ (\mathrm{dB})$")
         ax4.set_ylabel(r"$\angle Y_\mathrm{dq}\ (\mathrm{deg})$")
-        ax5.set_ylabel(r"$|Y_\mathrm{qd}|\ (\mathrm{S})$")
+        ax5.set_ylabel(r"$|Y_\mathrm{qd}|\ (\mathrm{dB})$")
         ax6.set_ylabel(r"$\angle Y_\mathrm{qd}\ (\mathrm{deg})$")
-        ax7.set_ylabel(r"$|Y_\mathrm{qq}|\ (\mathrm{S})$")
+        ax7.set_ylabel(r"$|Y_\mathrm{qq}|\ (\mathrm{dB})$")
         ax8.set_ylabel(r"$\angle Y_\mathrm{qq}\ (\mathrm{deg})$")
 
         ax5.tick_params(axis="y", labelleft=True)
@@ -480,3 +514,89 @@ def plot_identification(
         ax1.set_ylabel("Passivity index")
 
         plt.show()
+
+
+def plot_vector_diagram(
+    res: IdentificationResults, base: utils.BaseValues, latex: bool = False
+):
+    """
+    Plot the converter, PCC, and grid voltage vectors in steady-state.
+
+    Parameters
+    ----------
+    res : IdentificationResults
+        Should contain the results from the identification.
+
+    """
+
+    from matplotlib.patches import Circle
+
+    u_g0 = res.e_g0 + res.Z_g * res.i_g0
+    u_c0 = u_g0 + res.Z_f * res.i_g0
+
+    _, ax = plt.subplots()
+    ax.grid(True, zorder=0)
+    circle = Circle((0, 0), 1, fill=False, edgecolor="gray", zorder=1)
+    ax.add_patch(circle)
+
+    ax.quiver(
+        0,
+        0,
+        res.e_g0.real / base.u,
+        0,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="blue",
+        label=r"$\boldsymbol{e}_\mathrm{g0}$",
+        zorder=2,
+    )
+    ax.quiver(
+        0,
+        0,
+        u_g0.real / base.u,
+        u_g0.imag / base.u,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="red",
+        label=r"$\boldsymbol{u}_\mathrm{g0}$",
+        zorder=2,
+    )
+    ax.quiver(
+        0,
+        0,
+        u_c0.real / base.u,
+        u_c0.imag / base.u,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="black",
+        label=r"$\boldsymbol{u}_\mathrm{c0}$",
+        zorder=2,
+    )
+    ax.quiver(
+        0,
+        0,
+        res.i_g0.real / base.i,
+        res.i_g0.imag / base.i,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="green",
+        label=r"$\boldsymbol{i}_\mathrm{g0}$",
+        zorder=2,
+    )
+    ticks = [-1, -0.5, 0, 0.5, 1]
+
+    ax.set_xlabel(r"$d\ \mathrm{(p.u.)}$")
+    ax.set_ylabel(r"$q\ \mathrm{(p.u.)}$")
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+
+    ax.legend(loc="best", bbox_to_anchor=(0.5, 0.0, 0.5, 0.5))
+    ax.set_aspect("equal")
+
+    plt.show()
