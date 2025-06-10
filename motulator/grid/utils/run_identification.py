@@ -6,7 +6,7 @@ from motulator.grid import control, model, utils
 from motulator.grid.utils._identification import (
     IdentificationCfg,
     plot_identification,  # noqa: F401
-    plot_vector_diagram,
+    plot_vector_diagram,  # noqa: F401
     run_identification,
 )
 
@@ -43,23 +43,23 @@ def setup_identification() -> tuple[
 
     # Configure the identification
     identification_cfg = IdentificationCfg(
-        op_point={"p_g": 0.5 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
+        op_point={"p_g": 0.87 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
         abs_u_e=0.01 * base.u,
-        f_start=100,
+        f_start=1,
         f_stop=10e3,
-        n_freqs=1,
-        multiprocess=False,
+        n_freqs=100,
+        multiprocess=True,
         T_s=1 / 10e3,
-        delay=0,
-        k_comp=0.5,
+        delay=1,
+        k_comp=1.5,
         # filename=None,
-        # filename="obs_f100-10k_n10log_p0.5_delay1",
+        filename="obs_f1-10k_n100log_p0.87_delay1_Lg0.74",
         # filename="gfl_f1-10k_n100log_p0.5_q0.5_delay1_Lf0.05",
-        filetype="mat",
+        filetype="csv",
     )
 
     # Configure the system model.
-    ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.85 * base.L)
+    ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.74 * base.L)
     ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=base.w, e_g=base.u)
     converter = model.VoltageSourceConverter(u_dc=650)
 
@@ -104,4 +104,4 @@ if __name__ == "__main__":
     res = run_identification(cfg, mdl, ctrl)
 
     # plot_identification(res, plot_style="re_im")
-    plot_vector_diagram(res, base)
+    # plot_vector_diagram(res, base)
