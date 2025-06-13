@@ -124,8 +124,8 @@ class IdentificationResults:
 
     Contains fields for excitation signal frequency `f_e`, elements of the output
     admittance matrix `[Y_dd, Y_qd; Y_dq, Y_qq]`, operating point grid current vector
-    `i_g0` (in synchronous coordinates aligned with the grid voltage), grid voltage
-    magnitude `e_g0`, converter output filter impedance `Z_f`, and grid impedance `Z_g`.
+    `i_g0`, grid voltage vector `e_g0` (in synchronous coordinates aligned with the
+    PCC voltage), converter output filter impedance `Z_f`, and grid impedance `Z_g`.
 
     """
 
@@ -135,7 +135,7 @@ class IdentificationResults:
     Y_dq: np.ndarray = field(default_factory=empty_array)
     Y_qq: np.ndarray = field(default_factory=empty_array)
     i_g0: complex = 0j
-    e_g0: float = 0
+    e_g0: complex = 0j
     Z_f: complex = 0j
     Z_g: complex = 0j
 
@@ -217,7 +217,7 @@ def pre_process(
     cfg: IdentificationCfg,
     mdl: model.GridConverterSystem,
     ctrl: control.GridConverterControlSystem,
-) -> tuple[model.Simulation, list[Any]]:
+) -> tuple[model.Simulation, list[Any], float]:
     """Simulate the system to the desired operating point."""
 
     # Set appropriate references
@@ -241,22 +241,33 @@ def pre_process(
     e_g0 = res.mdl.ac_filter.e_g_ab[-1] * np.conj(exp_j_theta_g0)
     u_g0 = res.mdl.ac_filter.u_g_ab[-1] * np.conj(exp_j_theta_g0)
     u_c0 = res.mdl.ac_filter.u_c_ab[-1] * np.conj(exp_j_theta_g0)
+
+    # Align coordinates with PCC voltage vector
+    phi_g = np.angle(u_g0) - np.angle(e_g0)
+    i_g0 = i_g0 * np.exp(-1j * phi_g)
+    e_g0 = e_g0 * np.exp(-1j * phi_g)
+    u_g0 = u_g0 * np.exp(-1j * phi_g)
+    u_c0 = u_c0 * np.exp(-1j * phi_g)
+
     Z_f = (u_c0 - u_g0) / i_g0
     Z_g = (u_g0 - e_g0) / i_g0
     operating_point = [i_g0, e_g0, Z_f, Z_g]
 
-    return sim, operating_point
+    return sim, operating_point, phi_g
 
 
 def identify(
-    cfg: IdentificationCfg, sim: model.Simulation, i: int, f_e: float
+    cfg: IdentificationCfg, sim: model.Simulation, i: int, f_e: float, phi_g: float
 ) -> list[Any]:
     """Calculate the output admittance at a single frequency."""
 
     # 1) d-axis injection
     mdl, ctrl = copy_state(sim)
-    mdl.ac_source.f_e = f_e
-    mdl.ac_source.u_ed = cfg.amplitudes[i]
+    mdl.ac_filter.f_e = f_e
+    mdl.ac_filter.u_ed = cfg.amplitudes[i]
+    mdl.ac_filter.phi_g = phi_g
+    # mdl.ac_source.f_e = f_e
+    # mdl.ac_source.u_ed = cfg.amplitudes[i]
     # Set new stop time and simulate
     t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
@@ -265,30 +276,53 @@ def identify(
 
     # Transform the voltage and current to synchronous coordinates and
     # calculate the DFT
-    u_g1 = np.conj(res_d.mdl.ac_source.exp_j_theta_g) * res_d.mdl.ac_filter.u_g_ab
+    u_g1 = (
+        np.exp(-1j * phi_g)
+        * np.conj(res_d.mdl.ac_source.exp_j_theta_g)
+        * res_d.mdl.ac_filter.u_g_ab
+    )
     u_gd1 = dft(cfg, u_g1.real, f_e)
     u_gq1 = dft(cfg, u_g1.imag, f_e)
-    i_g1 = np.conj(res_d.mdl.ac_source.exp_j_theta_g) * res_d.mdl.ac_filter.i_g_ab
+    i_g1 = (
+        np.exp(-1j * phi_g)
+        * np.conj(res_d.mdl.ac_source.exp_j_theta_g)
+        * res_d.mdl.ac_filter.i_g_ab
+    )
     i_gd1 = dft(cfg, i_g1.real, f_e)
     i_gq1 = dft(cfg, i_g1.imag, f_e)
+    # plt.plot(res_d.mdl.t, u_g1.real, res_d.mdl.t, u_g1.imag)
+    # plt.show()
 
     # 2) q-axis injection
     mdl, ctrl = copy_state(sim)
-    mdl.ac_source.f_e = f_e
-    mdl.ac_source.u_eq = cfg.amplitudes[i]
+    mdl.ac_filter.f_e = f_e
+    mdl.ac_filter.u_eq = cfg.amplitudes[i]
+    mdl.ac_filter.phi_g = phi_g
+    # mdl.ac_source.f_e = f_e
+    # mdl.ac_source.u_eq = cfg.amplitudes[i]
     sim_q = model.Simulation(mdl, ctrl, show_progress=False)
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
     # utils.plot(res_q, base=None)
 
     # DFT
-    u_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.u_g_ab
+    u_g2 = (
+        np.exp(-1j * phi_g)
+        * np.conj(res_q.mdl.ac_source.exp_j_theta_g)
+        * res_q.mdl.ac_filter.u_g_ab
+    )
     u_gd2 = dft(cfg, u_g2.real, f_e)
     u_gq2 = dft(cfg, u_g2.imag, f_e)
-    i_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.i_g_ab
+    i_g2 = (
+        np.exp(-1j * phi_g)
+        * np.conj(res_q.mdl.ac_source.exp_j_theta_g)
+        * res_q.mdl.ac_filter.i_g_ab
+    )
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
+    # plt.plot(res_d.mdl.t, u_g2.real, res_d.mdl.t, u_g2.imag)
+    # plt.show()
 
-    # # Print DFT coefficients for debugging
+    # Print DFT coefficients for debugging
     # print(
     #     f"f_e: {f_e:8.1f} u_gd1: {np.abs(u_gd1):5.2f} u_gq1: {np.abs(u_gq1):5.2f} "
     #     + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f} "
@@ -336,7 +370,7 @@ def run_identification(
 ) -> IdentificationResults:
     """Run the identification."""
     results = []
-    sim_op, operating_point = pre_process(cfg, mdl, ctrl)
+    sim_op, operating_point, phi_g = pre_process(cfg, mdl, ctrl)
     t_start = time()
     print("Start identification...")
 
@@ -359,7 +393,7 @@ def run_identification(
             for i, f_e in enumerate(cfg.freqs):
                 async_result = pool.apply_async(
                     identify,
-                    args=[cfg, sim_op, i, f_e],
+                    args=[cfg, sim_op, i, f_e, phi_g],
                     error_callback=custom_error_callback,
                     callback=collect_result,
                 )
@@ -371,7 +405,7 @@ def run_identification(
     else:
         # Run only in single thread
         for i, f_e in enumerate(cfg.freqs):
-            result = identify(cfg, sim_op, i=i, f_e=f_e)
+            result = identify(cfg, sim_op, i=i, f_e=f_e, phi_g=phi_g)
             collect_result(result)
 
     print(f"\nExecution time: {(time() - t_start):.2f} s")
@@ -531,6 +565,8 @@ def plot_vector_diagram(
 
     from matplotlib.patches import Circle
 
+    set_screen_style()
+
     u_g0 = res.e_g0 + res.Z_g * res.i_g0
     u_c0 = u_g0 + res.Z_f * res.i_g0
 
@@ -543,7 +579,7 @@ def plot_vector_diagram(
         0,
         0,
         res.e_g0.real / base.u,
-        0,
+        res.e_g0.imag / base.u,
         angles="xy",
         scale_units="xy",
         scale=1,
@@ -596,7 +632,7 @@ def plot_vector_diagram(
     ax.set_xlim(-1.2, 1.2)
     ax.set_ylim(-1.2, 1.2)
 
-    ax.legend(loc="best", bbox_to_anchor=(0.5, 0.0, 0.5, 0.5))
+    ax.legend(loc="upper left")
     ax.set_aspect("equal")
 
     plt.show()

@@ -5,7 +5,7 @@ from motulator.common.model._converter import (
     CapacitiveDCBusConverter,
     VoltageSourceConverter,
 )
-from motulator.grid.model._ac_filter import LCLFilter, LFilter
+from motulator.grid.model._ac_filter import LCLFilter, LFilter, LFilterSignalInjection
 from motulator.grid.model._ac_source import (
     ThreePhaseSource,
     ThreePhaseSourceWithSignalInjection,
@@ -35,7 +35,7 @@ class GridConverterSystem(Model):
     def __init__(
         self,
         converter: VoltageSourceConverter | CapacitiveDCBusConverter,
-        ac_filter: LFilter | LCLFilter,
+        ac_filter: LFilter | LCLFilter | LFilterSignalInjection,
         ac_source: ThreePhaseSource | ThreePhaseSourceWithSignalInjection,
         pwm: bool = False,
         delay: int = 1,
@@ -55,6 +55,7 @@ class GridConverterSystem(Model):
             (self.converter, "i_c_ab"): (self.ac_filter, "i_c_ab"),
             (self.ac_filter, "u_c_ab"): (self.converter, "u_c_ab"),
             (self.ac_filter, "e_g_ab"): (self.ac_source, "e_g_ab"),
+            (self.ac_filter, "exp_j_theta_g"): (self.ac_source, "exp_j_theta_g"),
         }
 
         # Define ZOH inputs separately

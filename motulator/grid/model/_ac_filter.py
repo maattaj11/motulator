@@ -310,3 +310,175 @@ class LCLFilterTimeSeries(SubsystemTimeSeries):
     ) -> None:
         """Process input time series."""
         self.u_g_ab = subsystem.pcc_voltage(self, self)
+
+
+# %%
+@dataclass
+class LFilterSignalInjectionInputs:
+    """AC filter inputs."""
+
+    u_c_ab: complex = 0j
+    e_g_ab: complex = 0j
+    exp_j_theta_g: complex = complex(1)
+
+
+@dataclass
+class LFilterSignalInjectionOutputs:
+    """Base class for outputs."""
+
+    i_c_ab: complex
+
+
+@dataclass
+class LFilterSignalInjectionStates:
+    """State variables."""
+
+    i_c_ab: complex = 0j
+    exp_j_theta_e: complex = complex(1)
+
+
+@dataclass
+class LFilterSignalInjectionStateHistory:
+    """State history."""
+
+    i_c_ab: list[complex] = field(default_factory=list)
+    exp_j_theta_e: list[complex] = field(default_factory=list)
+
+
+class LFilterSignalInjection(Subsystem):
+    """
+    Model of an L filter and an inductive-resistive grid.
+
+    An L filter and an inductive-resistive grid, between the converter and grid voltage
+    sources, are modeled combining their inductances and series resistances. The point-
+    of-common-coupling (PCC) voltage between the L filter and the grid impedance is
+    calculated.
+
+    Parameters
+    ----------
+    L_f : float
+        Filter inductance (H).
+    R_f : float, optional
+        Series resistance (Ω) of the filter inductor, defaults to 0.
+    L_g : float, optional
+        Grid inductance (H), defaults to 0.
+    R_g : float, optional
+        Grid resistance (Ω), defaults to 0.
+
+    """
+
+    def __init__(
+        self,
+        L_f: float,
+        R_f: float = 0.0,
+        L_g: float = 0.0,
+        R_g: float = 0.0,
+        u_ed: float = 0.0,
+        u_eq: float = 0.0,
+        f_e: float = 0.0,
+        phi_g: float = 0,
+    ) -> None:
+        self.L_f = L_f
+        self.R_f = R_f
+        self.L_g = L_g
+        self.R_g = R_g
+        self.u_ed = u_ed
+        self.u_eq = u_eq
+        self.f_e = f_e
+        self.phi_g = phi_g
+        # The following initial conditions are needed for computing the PCC voltage,
+        # which has direct feedthrough. The PCC voltage is used only as a feedback
+        # signal for the control system (but not coupled to the solution of the
+        # continuous-time system). If the transients during the very first time steps
+        # are important, these initial conditions can be set to appropriate values.
+        self.inp: LFilterSignalInjectionInputs = LFilterSignalInjectionInputs()
+        self.state: LFilterSignalInjectionStates = LFilterSignalInjectionStates()
+        self.out: LFilterSignalInjectionOutputs = LFilterSignalInjectionOutputs(
+            self.state.i_c_ab
+        )
+        self._history: LFilterSignalInjectionStateHistory = (
+            LFilterSignalInjectionStateHistory()
+        )
+
+    def pcc_voltage(self, state: Any, inp: Any) -> Any:
+        """Compute the voltage at the point of common coupling (PCC)."""
+        L_t = self.L_f + self.L_g
+        u_e_ab = self.excitation_voltage(state, inp)
+
+        u_g_ab = (
+            self.L_g * (inp.u_c_ab - self.R_f * state.i_c_ab)
+            + self.L_f * (u_e_ab + inp.e_g_ab + self.R_g * state.i_c_ab)
+        ) / L_t
+
+        return u_g_ab
+
+    def excitation_voltage(self, state: Any, inp: Any) -> Any:
+        """Compute excitation signal."""
+
+        # Excitation signal in synchronous coordinates aligned with PCC voltage
+        u_e = ((self.u_ed + 1j * self.u_eq) * np.real(state.exp_j_theta_e)) * np.exp(
+            1j * self.phi_g
+        )
+
+        # Transform to stationary coordinates
+        u_e_ab = u_e * inp.exp_j_theta_g
+
+        return u_e_ab
+
+    def set_outputs(self, t: float) -> None:
+        """Set output variables."""
+        self.out.i_c_ab = self.state.i_c_ab
+
+    def rhs(self, t: float) -> list[complex]:
+        """Compute the state derivatives."""
+        state = self.state
+        inp = self.inp
+        u_e_ab = self.excitation_voltage(self.state, self.inp)
+        L_t = self.L_f + self.L_g
+        R_t = self.R_f + self.R_g
+        d_i_c_ab = (inp.u_c_ab - u_e_ab - inp.e_g_ab - R_t * state.i_c_ab) / L_t
+        d_exp_j_theta_e = 2 * np.pi * 1j * self.f_e * self.state.exp_j_theta_e
+        return [d_i_c_ab, d_exp_j_theta_e]
+
+    def meas_currents(self) -> Any:
+        """Measure the converter phase currents (A)."""
+        return complex2abc(self.state.i_c_ab)
+
+    def meas_pcc_voltages(self) -> Any:
+        """Measure the phase voltages (V) at the PCC."""
+        u_g_ab = self.pcc_voltage(self.state, self.inp)
+        return complex2abc(u_g_ab)
+
+    def create_time_series(
+        self, t: np.ndarray
+    ) -> tuple[str, "LFilterSignalInjectionTimeSeries"]:
+        """Create time series from state list."""
+        return "ac_filter", LFilterSignalInjectionTimeSeries(t, self)
+
+
+@dataclass
+class LFilterSignalInjectionTimeSeries(SubsystemTimeSeries):
+    """Continuous time series."""
+
+    t: InitVar[np.ndarray]
+    subsystem: InitVar[LFilterSignalInjection]
+    # State
+    i_c_ab: np.ndarray = field(default_factory=empty_array)
+    # Inputs
+    u_c_ab: np.ndarray = field(default_factory=empty_array)
+    e_g_ab: np.ndarray = field(default_factory=empty_array)
+    # Outputs
+    u_g_ab: np.ndarray = field(default_factory=empty_array)
+    i_g_ab: np.ndarray = field(default_factory=empty_array)
+
+    def __post_init__(self, t: np.ndarray, subsystem: LFilterSignalInjection) -> None:
+        """Compute output time series from the states."""
+        self.i_c_ab = np.array(subsystem._history.i_c_ab)
+        self.i_g_ab = self.i_c_ab
+        self.exp_j_theta_e = np.array(subsystem._history.exp_j_theta_e)
+
+    def compute_input_derived_signals(
+        self, t: np.ndarray, subsystem: LFilterSignalInjection
+    ) -> None:
+        """Compute direct feedthrough time series."""
+        self.u_g_ab = subsystem.pcc_voltage(self, self)

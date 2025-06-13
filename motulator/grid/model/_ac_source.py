@@ -22,6 +22,7 @@ class Outputs:
     """Output variables."""
 
     e_g_ab: complex = complex(1)
+    exp_j_theta_g: complex = complex(1)
 
 
 @dataclass
@@ -92,6 +93,7 @@ class ThreePhaseSource(Subsystem):
     def set_outputs(self, t) -> None:
         """Set output variables."""
         self.out.e_g_ab = self.generate_space_vector(t, self.state.exp_j_theta_g)
+        self.out.exp_j_theta_g = self.state.exp_j_theta_g
 
     def rhs(self, t) -> list[complex]:
         """Compute the state derivative."""
@@ -204,6 +206,7 @@ class ThreePhaseSourceWithSignalInjection(Subsystem):
         self.out.e_g_ab = self.generate_space_vector(
             t, self.state.exp_j_theta_g, self.state.exp_j_theta_e
         )
+        self.out.exp_j_theta_g = self.state.exp_j_theta_g
 
     def rhs(self, t) -> list[complex]:
         """Compute the state derivative."""
