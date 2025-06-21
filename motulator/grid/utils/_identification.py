@@ -11,11 +11,12 @@ from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Circle
 from scipy.io import savemat
 from scipy.signal.windows import blackman
 
 from motulator.common.utils._utils import empty_array, set_latex_style, set_screen_style
-from motulator.grid import control, model, utils  # noqa: F401
+from motulator.grid import control, model, utils
 
 
 # %%
@@ -141,8 +142,6 @@ class IdentificationResults:
 
 
 # %%
-
-
 def save_csv(data: IdentificationResults, filename: str) -> None:
     """Save the identification results in a .csv-file."""
 
@@ -233,7 +232,6 @@ def pre_process(
     # Create Simulation object and simulate
     sim = model.Simulation(mdl, ctrl, show_progress=False)
     res = sim.simulate(t_stop=cfg.t0)
-    # utils.plot(res, base=None)
 
     # Calculate operating point
     exp_j_theta_g0 = res.mdl.ac_source.exp_j_theta_g[-1]
@@ -266,13 +264,10 @@ def identify(
     mdl.ac_filter.f_e = f_e
     mdl.ac_filter.u_ed = cfg.amplitudes[i]
     mdl.ac_filter.phi_g = phi_g
-    # mdl.ac_source.f_e = f_e
-    # mdl.ac_source.u_ed = cfg.amplitudes[i]
     # Set new stop time and simulate
     t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
     res_d = sim_d.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
-    # utils.plot(res_d, base=None)
 
     # Transform the voltage and current to synchronous coordinates and
     # calculate the DFT
@@ -290,19 +285,14 @@ def identify(
     )
     i_gd1 = dft(cfg, i_g1.real, f_e)
     i_gq1 = dft(cfg, i_g1.imag, f_e)
-    # plt.plot(res_d.mdl.t, u_g1.real, res_d.mdl.t, u_g1.imag)
-    # plt.show()
 
     # 2) q-axis injection
     mdl, ctrl = copy_state(sim)
     mdl.ac_filter.f_e = f_e
     mdl.ac_filter.u_eq = cfg.amplitudes[i]
     mdl.ac_filter.phi_g = phi_g
-    # mdl.ac_source.f_e = f_e
-    # mdl.ac_source.u_eq = cfg.amplitudes[i]
     sim_q = model.Simulation(mdl, ctrl, show_progress=False)
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
-    # utils.plot(res_q, base=None)
 
     # DFT
     u_g2 = (
@@ -319,16 +309,6 @@ def identify(
     )
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
-    # plt.plot(res_d.mdl.t, u_g2.real, res_d.mdl.t, u_g2.imag)
-    # plt.show()
-
-    # Print DFT coefficients for debugging
-    # print(
-    #     f"f_e: {f_e:8.1f} u_gd1: {np.abs(u_gd1):5.2f} u_gq1: {np.abs(u_gq1):5.2f} "
-    #     + f"u_gd2: {np.abs(u_gd2):5.2f} u_gq2: {np.abs(u_gq2):5.2f} "
-    #     + f"i_gd1: {np.abs(i_gd1):5.2f} i_gq1: {np.abs(i_gq1):5.2f} "
-    #     + f"i_gd2: {np.abs(i_gd2):5.2f} i_gq2: {np.abs(i_gq2):5.2f}"
-    # )
 
     # Calculate the elements of the output admittance matrix
     I = np.array([[i_gd1, i_gd2], [i_gq1, i_gq2]])  # noqa: E741
@@ -554,7 +534,8 @@ def plot_vector_diagram(
     res: IdentificationResults, base: utils.BaseValues, latex: bool = False
 ):
     """
-    Plot the converter, PCC, and grid voltage vectors in steady-state.
+    Plot the converter voltage, PCC voltage, grid voltage, and grid current vectors in
+    the operating point.
 
     Parameters
     ----------
@@ -563,9 +544,10 @@ def plot_vector_diagram(
 
     """
 
-    from matplotlib.patches import Circle
-
-    set_screen_style()
+    if latex:
+        set_latex_style()
+    else:
+        set_screen_style()
 
     u_g0 = res.e_g0 + res.Z_g * res.i_g0
     u_c0 = u_g0 + res.Z_f * res.i_g0
@@ -584,7 +566,7 @@ def plot_vector_diagram(
         scale_units="xy",
         scale=1,
         color="blue",
-        label=r"$\boldsymbol{e}_\mathrm{g0}$",
+        label=r"$\mathbf{e}_\mathrm{g0}$",
         zorder=2,
     )
     ax.quiver(
@@ -596,7 +578,7 @@ def plot_vector_diagram(
         scale_units="xy",
         scale=1,
         color="red",
-        label=r"$\boldsymbol{u}_\mathrm{g0}$",
+        label=r"$\mathbf{u}_\mathrm{g0}$",
         zorder=2,
     )
     ax.quiver(
@@ -608,7 +590,7 @@ def plot_vector_diagram(
         scale_units="xy",
         scale=1,
         color="black",
-        label=r"$\boldsymbol{u}_\mathrm{c0}$",
+        label=r"$\mathbf{u}_\mathrm{c0}$",
         zorder=2,
     )
     ax.quiver(
@@ -620,7 +602,7 @@ def plot_vector_diagram(
         scale_units="xy",
         scale=1,
         color="green",
-        label=r"$\boldsymbol{i}_\mathrm{g0}$",
+        label=r"$\mathbf{i}_\mathrm{g0}$",
         zorder=2,
     )
     ticks = [-1, -0.5, 0, 0.5, 1]

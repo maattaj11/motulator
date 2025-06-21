@@ -205,6 +205,7 @@ class PWM:
     def update(self, u_c_ab: complex) -> None:
         """Update the realized voltage."""
         self.realized_voltage = 0.5 * (self._old_u_c_ab + u_c_ab)
+        # self.realized_voltage = u_c_ab
         self._old_u_c_ab = u_c_ab
 
     def __call__(
