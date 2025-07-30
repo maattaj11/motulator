@@ -14,14 +14,14 @@ from motulator.grid import control, model, utils
 # %%
 # Compute base values based on the nominal values.
 
-nom = utils.NominalValues(U=400, I=14.5, f=50, P=10e3)
+nom = utils.NominalValues(U=400, I=14.5, f=50, P=12.5e3)
 base = utils.BaseValues.from_nominal(nom)
 
 # %%
 # Configure the system model.
 
 # Filter and grid
-ac_filter = model.LFilter(L_f=0.2 * base.L)
+ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.15 * base.L)
 ac_source = model.ThreePhaseSource(w_g=base.w, e_g=base.u)
 converter = model.VoltageSourceConverter(u_dc=650)
 mdl = model.GridConverterSystem(converter, ac_filter, ac_source)
@@ -29,15 +29,15 @@ mdl = model.GridConverterSystem(converter, ac_filter, ac_source)
 # %%
 # Configure the control system.
 
-inner_ctrl = control.CurrentVectorController(i_max=1.5 * base.i, L=0.2 * base.L)
+inner_ctrl = control.CurrentVectorController(i_max=1.5 * base.i, L=0.15 * base.L)
 ctrl = control.GridConverterControlSystem(inner_ctrl)
 
 # %%
 # Set the time-dependent reference and disturbance signals.
 
 # Set the active and reactive power references
-ctrl.set_power_ref(lambda t: (t > 0.02) * 5e3)
-ctrl.set_reactive_power_ref(lambda t: (t > 0.04) * 4e3)
+ctrl.set_power_ref(lambda t: 0.5 * base.p)
+ctrl.set_reactive_power_ref(lambda t: 0.5 * base.p)
 
 # Uncomment lines below to simulate an unbalanced fault (add negative sequence)
 # from math import pi

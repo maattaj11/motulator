@@ -24,7 +24,7 @@ def setup_identification() -> tuple[
 
     # Configure the identification
     identification_cfg = IdentificationCfg(
-        op_point={"p_g": 0.5 * base.p, "q_g": 0.5 * base.p, "v_c": base.u},
+        op_point={"p_g": 1 * base.p, "q_g": 0.5 * base.p, "v_c": 1.05 * base.u},
         abs_u_e=0.01 * base.u,
         f_start=1,
         f_stop=10e3,
@@ -39,8 +39,8 @@ def setup_identification() -> tuple[
     )
 
     # Configure the system model.
-    ac_filter = model.LFilterSignalInjection(L_f=0.15 * base.L, L_g=0 * base.L)
-    ac_source = model.ThreePhaseSource(w_g=base.w, e_g=base.u)
+    ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.4 * base.L)
+    ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=base.w, e_g=base.u)
     converter = model.VoltageSourceConverter(u_dc=650)
 
     # Create system model
@@ -50,28 +50,28 @@ def setup_identification() -> tuple[
 
     # Configure the control system.
 
-    # GFL
-    inner_ctrl = control.CurrentVectorController(
-        i_max=1.5 * base.i,
-        L=0.15 * base.L,
-        u_nom=base.u,
-        w_nom=base.w,
-        T_s=identification_cfg.T_s,
-        k_comp=identification_cfg.k_comp,
-    )
-
-    # # Observer GFM
-    # inner_ctrl = control.ObserverBasedGridFormingController(
-    #     i_max=1.3 * base.i,
+    # # GFL
+    # inner_ctrl = control.CurrentVectorController(
+    #     i_max=1.5 * base.i,
     #     L=0.15 * base.L,
-    #     R_a=0.2 * base.Z,
-    #     k_v=1,
-    #     alpha_o=base.w,
     #     u_nom=base.u,
     #     w_nom=base.w,
     #     T_s=identification_cfg.T_s,
     #     k_comp=identification_cfg.k_comp,
     # )
+
+    # Observer GFM
+    inner_ctrl = control.ObserverBasedGridFormingController(
+        i_max=1.3 * base.i,
+        L=0.15 * base.L,
+        R_a=0.2 * base.Z,
+        k_v=1,
+        alpha_o=base.w,
+        u_nom=base.u,
+        w_nom=base.w,
+        T_s=identification_cfg.T_s,
+        k_comp=identification_cfg.k_comp,
+    )
 
     ctrl = control.GridConverterControlSystem(inner_ctrl)
     return identification_cfg, mdl, ctrl, base

@@ -261,9 +261,9 @@ def identify(
 
     # 1) d-axis injection
     mdl, ctrl = copy_state(sim)
-    mdl.ac_filter.f_e = f_e
-    mdl.ac_filter.u_ed = cfg.amplitudes[i]
-    mdl.ac_filter.phi_g = phi_g
+    mdl.ac_source.f_e = f_e
+    mdl.ac_source.u_ed = cfg.amplitudes[i]
+    # mdl.ac_filter.phi_g = phi_g
     # Set new stop time and simulate
     t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
@@ -288,9 +288,9 @@ def identify(
 
     # 2) q-axis injection
     mdl, ctrl = copy_state(sim)
-    mdl.ac_filter.f_e = f_e
-    mdl.ac_filter.u_eq = cfg.amplitudes[i]
-    mdl.ac_filter.phi_g = phi_g
+    mdl.ac_source.f_e = f_e
+    mdl.ac_source.u_eq = cfg.amplitudes[i]
+    # mdl.ac_filter.phi_g = phi_g
     sim_q = model.Simulation(mdl, ctrl, show_progress=False)
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
