@@ -103,6 +103,9 @@ class GridConverterControlSystem(ControlSystem):
         Inner controller.
     dc_bus_voltage_ctrl: DCBusVoltageController, optional
         DC-bus voltage controller. If not given, power-control mode is used.
+    k_comp : float, optional
+        Compensation factor for the angular delay effect, sent to the PWM class.
+        Defaults to 1.5.
 
     """
 
@@ -110,9 +113,10 @@ class GridConverterControlSystem(ControlSystem):
         self,
         inner_ctrl: GridFormingController | GridFollowingController,
         dc_bus_voltage_ctrl: DCBusVoltageController | None = None,
+        k_comp: float = 1.5,
     ) -> None:
         super().__init__()
-        self.pwm = PWM()
+        self.pwm = PWM(k_comp=k_comp)
         self.inner_ctrl = inner_ctrl
         self.dc_bus_voltage_ctrl = dc_bus_voltage_ctrl
         self.ext_ref: ExternalReferences = ExternalReferences()
