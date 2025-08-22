@@ -4,7 +4,7 @@ import multiprocessing as mp
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from os import makedirs
+from os import environ, makedirs
 from os.path import join
 from time import time
 from typing import Any, Literal
@@ -352,7 +352,10 @@ def run_identification(
     results = []
     sim_op, operating_point, phi_g = pre_process(cfg, mdl, ctrl)
     t_start = time()
-    print("Start identification...")
+
+    show_progress = False if environ.get("BUILDING_DOCS") == "1" else True
+    if show_progress:
+        print("Start identification...")
 
     index = 1
     freqs = np.size(cfg.freqs)
@@ -360,7 +363,8 @@ def run_identification(
     def collect_result(result: list[Any]) -> None:
         nonlocal index
         results.append(result)
-        print(f"\rFrequencies simulated: {index}/{freqs}", end="")
+        if show_progress:
+            print(f"\rFrequencies simulated: {index}/{freqs}", end="")
         index += 1
 
     def custom_error_callback(error: Any) -> None:
@@ -388,7 +392,8 @@ def run_identification(
             result = identify(cfg, sim_op, i=i, f_e=f_e, phi_g=phi_g)
             collect_result(result)
 
-    print(f"\nExecution time: {(time() - t_start):.2f} s")
+    if show_progress:
+        print(f"\nExecution time: {(time() - t_start):.2f} s")
     data = post_process(results, operating_point)
     if cfg.filename is not None:
         if cfg.filetype == "csv":
@@ -511,6 +516,15 @@ def plot_identification(
     ax4.set_xlabel(r"Frequency (Hz)")
     ax8.set_xlabel(r"Frequency (Hz)")
 
+    ax1.margins(x=0)
+    ax2.margins(x=0)
+    ax3.margins(x=0)
+    ax4.margins(x=0)
+    ax5.margins(x=0)
+    ax6.margins(x=0)
+    ax7.margins(x=0)
+    ax8.margins(x=0)
+
     fig.align_ylabels()
     plt.show()
 
@@ -526,6 +540,7 @@ def plot_identification(
         ax1.semilogx(res.f_e, v_F.real)
         ax1.set_xlabel("Frequency (Hz)")
         ax1.set_ylabel("Passivity index")
+        ax1.margins(x=0)
 
         plt.show()
 
