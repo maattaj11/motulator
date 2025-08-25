@@ -11,8 +11,8 @@ disturbance-observer-based grid-forming (DO-GFM) converter.
 from motulator.grid import control, model, utils
 from motulator.grid.utils._identification import (
     IdentificationCfg,
-    plot_identification,  # noqa: F401
-    plot_vector_diagram,  # noqa: F401
+    plot_identification,
+    plot_vector_diagram,
     run_identification,
 )
 
@@ -33,7 +33,6 @@ identification_cfg = IdentificationCfg(
     n_freqs=100,
     multiprocess=True,
     T_s=1 / 10e3,
-    delay=1,
     # Uncomment the row below to save identification results in "project root"/data
     # filename="do-gfm_admittance",
     filetype="csv",
