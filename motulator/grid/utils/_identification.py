@@ -85,6 +85,9 @@ class IdentificationCfg:
         voltage vector angle. The default is 1.5.
     use_window : bool, optional
         Whether to use window function for calculating DFT. Defaults to True.
+    variable_amplitude : bool, optional
+        Whether to increase the excitation signal amplitude with the frequency. Defaults
+        to True.
 
     """
 
@@ -106,6 +109,7 @@ class IdentificationCfg:
     delay: int = 1
     k_comp: float = 1.5
     use_window: bool = True
+    variable_amplitude: bool = True
 
     def __post_init__(self) -> None:
         # Create array of frequencies if not specified
@@ -116,8 +120,11 @@ class IdentificationCfg:
                 self.freqs = np.geomspace(self.f_start, self.f_stop, self.n_freqs)
         else:
             self.freqs = self.manual_freqs
-        # Increase excitation signal amplitude with the frequency
-        self.amplitudes = self.abs_u_e * np.linspace(1.0, 5.0, np.size(self.freqs))
+        # Increase excitation signal amplitude with the frequency if configured
+        if self.variable_amplitude:
+            self.amplitudes = self.abs_u_e * np.linspace(1.0, 5.0, np.size(self.freqs))
+        else:
+            self.amplitudes = np.full(np.size(self.freqs), self.abs_u_e)
 
 
 @dataclass
