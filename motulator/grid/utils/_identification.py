@@ -146,8 +146,8 @@ class IdentificationResults:
     Y_qq: np.ndarray = field(default_factory=empty_array)
     i_g0: complex = 0j
     e_g0: complex = 0j
-    Z_f: complex = 0j
-    Z_g: complex = 0j
+    u_g0: complex = 0j
+    u_c0: complex = 0j
 
 
 # %%
@@ -245,7 +245,11 @@ def pre_process(
     i_g0 = res.mdl.ac_filter.i_g_ab[-1] * np.conj(exp_j_theta_g0)
     e_g0 = res.mdl.ac_filter.e_g_ab[-1] * np.conj(exp_j_theta_g0)
     u_g0 = res.mdl.ac_filter.u_g_ab[-1] * np.conj(exp_j_theta_g0)
-    u_c0 = res.mdl.ac_filter.u_c_ab[-1] * np.conj(exp_j_theta_g0)
+    u_c0 = (
+        res.ctrl.fbk.u_c[-1]
+        * np.exp(1j * res.ctrl.fbk.theta_c[-1])
+        * np.conj(exp_j_theta_g0)
+    )
 
     # Align coordinates with PCC voltage vector
     phi_g = np.angle(u_g0) - np.angle(e_g0)
@@ -254,9 +258,9 @@ def pre_process(
     u_g0 = u_g0 * np.exp(-1j * phi_g)
     u_c0 = u_c0 * np.exp(-1j * phi_g)
 
-    Z_f = (u_c0 - u_g0) / i_g0
-    Z_g = (u_g0 - e_g0) / i_g0
-    operating_point = [i_g0, e_g0, Z_f, Z_g]
+    # Z_f = (u_c0 - u_g0) / i_g0
+    # Z_g = (u_g0 - e_g0) / i_g0
+    operating_point = [i_g0, e_g0, u_g0, u_c0]
 
     return sim, operating_point, phi_g
 
@@ -278,18 +282,10 @@ def identify(
 
     # Transform the voltage and current to synchronous coordinates and
     # calculate the DFT
-    u_g1 = (
-        np.exp(-1j * phi_g)
-        * np.conj(res_d.mdl.ac_source.exp_j_theta_g)
-        * res_d.mdl.ac_filter.u_g_ab
-    )
+    u_g1 = np.conj(res_d.mdl.ac_source.exp_j_theta_g) * res_d.mdl.ac_filter.u_g_ab
     u_gd1 = dft(cfg, u_g1.real, f_e)
     u_gq1 = dft(cfg, u_g1.imag, f_e)
-    i_g1 = (
-        np.exp(-1j * phi_g)
-        * np.conj(res_d.mdl.ac_source.exp_j_theta_g)
-        * res_d.mdl.ac_filter.i_g_ab
-    )
+    i_g1 = np.conj(res_d.mdl.ac_source.exp_j_theta_g) * res_d.mdl.ac_filter.i_g_ab
     i_gd1 = dft(cfg, i_g1.real, f_e)
     i_gq1 = dft(cfg, i_g1.imag, f_e)
 
@@ -302,18 +298,10 @@ def identify(
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
     # DFT
-    u_g2 = (
-        np.exp(-1j * phi_g)
-        * np.conj(res_q.mdl.ac_source.exp_j_theta_g)
-        * res_q.mdl.ac_filter.u_g_ab
-    )
+    u_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.u_g_ab
     u_gd2 = dft(cfg, u_g2.real, f_e)
     u_gq2 = dft(cfg, u_g2.imag, f_e)
-    i_g2 = (
-        np.exp(-1j * phi_g)
-        * np.conj(res_q.mdl.ac_source.exp_j_theta_g)
-        * res_q.mdl.ac_filter.i_g_ab
-    )
+    i_g2 = np.conj(res_q.mdl.ac_source.exp_j_theta_g) * res_q.mdl.ac_filter.i_g_ab
     i_gd2 = dft(cfg, i_g2.real, f_e)
     i_gq2 = dft(cfg, i_g2.imag, f_e)
 
@@ -335,16 +323,33 @@ def post_process(
 ) -> IdentificationResults:
     """Save the identification results and information about the operating point."""
     results_array = np.vstack(results)
+
+    # Align the output admittance matrix with the operating-point PCC voltage vector
+    I = np.eye(2)  # noqa: E741
+    J = np.array([[0, -1], [1, 0]])
+    theta = np.angle(operating_point[2]) - np.angle(operating_point[1])
+    R1 = np.cos(theta) * I + np.sin(theta) * J
+    R2 = np.cos(theta) * I - np.sin(theta) * J
+    Y_cp = np.array(
+        [
+            [results_array[:, 2], results_array[:, 3]],
+            [results_array[:, 4], results_array[:, 5]],
+        ]
+    )
+    Y_cp = np.moveaxis(Y_cp, -1, 0)
+    # Y_c = np.empty(len(results_array[:, 0]))
+    # for i in range(len(results_array[:, 0])):
+    Y_c = R1 @ Y_cp @ R2
     res = IdentificationResults(
         f_e=np.real(results_array[:, 1]),
-        Y_dd=results_array[:, 2],
-        Y_qd=results_array[:, 3],
-        Y_dq=results_array[:, 4],
-        Y_qq=results_array[:, 5],
+        Y_dd=Y_c[:, 0, 0],
+        Y_qd=Y_c[:, 0, 1],
+        Y_dq=Y_c[:, 1, 0],
+        Y_qq=Y_c[:, 1, 1],
         i_g0=operating_point[0],
         e_g0=operating_point[1],
-        Z_f=operating_point[2],
-        Z_g=operating_point[3],
+        u_g0=operating_point[2],
+        u_c0=operating_point[3],
     )
     return res
 
@@ -571,9 +576,6 @@ def plot_vector_diagram(
     else:
         set_screen_style()
 
-    u_g0 = res.e_g0 + res.Z_g * res.i_g0
-    u_c0 = u_g0 + res.Z_f * res.i_g0
-
     _, ax = plt.subplots()
     ax.grid(True, zorder=0)
     circle = Circle((0, 0), 1, fill=False, edgecolor="gray", zorder=1)
@@ -594,8 +596,8 @@ def plot_vector_diagram(
     ax.quiver(
         0,
         0,
-        u_g0.real / base.u,
-        u_g0.imag / base.u,
+        res.u_g0.real / base.u,
+        res.u_g0.imag / base.u,
         angles="xy",
         scale_units="xy",
         scale=1,
@@ -606,8 +608,8 @@ def plot_vector_diagram(
     ax.quiver(
         0,
         0,
-        u_c0.real / base.u,
-        u_c0.imag / base.u,
+        res.u_c0.real / base.u,
+        res.u_c0.imag / base.u,
         angles="xy",
         scale_units="xy",
         scale=1,
