@@ -98,8 +98,8 @@ class IdentificationCfg:
     n_freqs: int = 100
     spacing: str = "log"
     manual_freqs: np.ndarray | None = None
-    t0: float = 0.1
-    t1: float = 0.02
+    t0: float = 0.5
+    t1: float = 0.1
     T_s: float = 1 / 10e3
     N_eval: int = 10
     n_periods: int = 4
@@ -133,10 +133,9 @@ class IdentificationResults:
     Container for identification results.
 
     Contains fields for excitation signal frequency `f_e`, elements of the output
-    admittance matrix `[Y_dd, Y_qd; Y_dq, Y_qq]`, operating point grid current vector
-    `i_g0`, grid voltage vector `e_g0` (in synchronous coordinates aligned with the
-    PCC voltage), converter output filter impedance `Z_f`, and grid impedance `Z_g`.
-
+    admittance matrix `[Y_dd, Y_qd; Y_dq, Y_qq]`, and the following operating-point
+    vectors (in synchronous coordinates aligned with the PCC voltage): grid current
+    `i_g0`, grid voltage `e_g0`, PCC voltage `u_g0` and converter voltage `u_c0`.
     """
 
     f_e: np.ndarray = field(default_factory=empty_array)
@@ -223,7 +222,7 @@ def pre_process(
     cfg: IdentificationCfg,
     mdl: model.GridConverterSystem,
     ctrl: control.GridConverterControlSystem,
-) -> tuple[model.Simulation, list[Any], float]:
+) -> tuple[model.Simulation, list[Any]]:
     """Simulate the system to the desired operating point."""
 
     # Set appropriate references
@@ -245,11 +244,7 @@ def pre_process(
     i_g0 = res.mdl.ac_filter.i_g_ab[-1] * np.conj(exp_j_theta_g0)
     e_g0 = res.mdl.ac_filter.e_g_ab[-1] * np.conj(exp_j_theta_g0)
     u_g0 = res.mdl.ac_filter.u_g_ab[-1] * np.conj(exp_j_theta_g0)
-    u_c0 = (
-        res.ctrl.fbk.u_c[-1]
-        * np.exp(1j * res.ctrl.fbk.theta_c[-1])
-        * np.conj(exp_j_theta_g0)
-    )
+    u_c0 = res.mdl.ac_filter.u_c_ab[-1] * np.conj(exp_j_theta_g0)
 
     # Align coordinates with PCC voltage vector
     phi_g = np.angle(u_g0) - np.angle(e_g0)
@@ -258,15 +253,13 @@ def pre_process(
     u_g0 = u_g0 * np.exp(-1j * phi_g)
     u_c0 = u_c0 * np.exp(-1j * phi_g)
 
-    # Z_f = (u_c0 - u_g0) / i_g0
-    # Z_g = (u_g0 - e_g0) / i_g0
     operating_point = [i_g0, e_g0, u_g0, u_c0]
 
-    return sim, operating_point, phi_g
+    return sim, operating_point
 
 
 def identify(
-    cfg: IdentificationCfg, sim: model.Simulation, i: int, f_e: float, phi_g: float
+    cfg: IdentificationCfg, sim: model.Simulation, i: int, f_e: float
 ) -> list[Any]:
     """Calculate the output admittance at a single frequency."""
 
@@ -274,7 +267,6 @@ def identify(
     mdl, ctrl = copy_state(sim)
     mdl.ac_source.f_e = f_e
     mdl.ac_source.u_ed = cfg.amplitudes[i]
-    # mdl.ac_filter.phi_g = phi_g
     # Set new stop time and simulate
     t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
@@ -293,7 +285,6 @@ def identify(
     mdl, ctrl = copy_state(sim)
     mdl.ac_source.f_e = f_e
     mdl.ac_source.u_eq = cfg.amplitudes[i]
-    # mdl.ac_filter.phi_g = phi_g
     sim_q = model.Simulation(mdl, ctrl, show_progress=False)
     res_q = sim_q.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
@@ -328,8 +319,8 @@ def post_process(
     I = np.eye(2)  # noqa: E741
     J = np.array([[0, -1], [1, 0]])
     theta = np.angle(operating_point[2]) - np.angle(operating_point[1])
-    R1 = np.cos(theta) * I + np.sin(theta) * J
-    R2 = np.cos(theta) * I - np.sin(theta) * J
+    R1 = np.cos(theta) * I - np.sin(theta) * J
+    R2 = np.cos(theta) * I + np.sin(theta) * J
     Y_cp = np.array(
         [
             [results_array[:, 2], results_array[:, 3]],
@@ -337,8 +328,6 @@ def post_process(
         ]
     )
     Y_cp = np.moveaxis(Y_cp, -1, 0)
-    # Y_c = np.empty(len(results_array[:, 0]))
-    # for i in range(len(results_array[:, 0])):
     Y_c = R1 @ Y_cp @ R2
     res = IdentificationResults(
         f_e=np.real(results_array[:, 1]),
@@ -362,7 +351,7 @@ def run_identification(
 ) -> IdentificationResults:
     """Run the identification."""
     results = []
-    sim_op, operating_point, phi_g = pre_process(cfg, mdl, ctrl)
+    sim_op, operating_point = pre_process(cfg, mdl, ctrl)
     t_start = time()
 
     show_progress = False if environ.get("BUILDING_DOCS") == "1" else True
@@ -389,7 +378,7 @@ def run_identification(
             for i, f_e in enumerate(cfg.freqs):
                 async_result = pool.apply_async(
                     identify,
-                    args=[cfg, sim_op, i, f_e, phi_g],
+                    args=[cfg, sim_op, i, f_e],
                     error_callback=custom_error_callback,
                     callback=collect_result,
                 )
@@ -401,7 +390,7 @@ def run_identification(
     else:
         # Run only in single thread
         for i, f_e in enumerate(cfg.freqs):
-            result = identify(cfg, sim_op, i=i, f_e=f_e, phi_g=phi_g)
+            result = identify(cfg, sim_op, i=i, f_e=f_e)
             collect_result(result)
 
     if show_progress:
