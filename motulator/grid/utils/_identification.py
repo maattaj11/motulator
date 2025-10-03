@@ -5,14 +5,13 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from os import environ, makedirs
-from os.path import join
+from os.path import exists, join
 from time import time
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Circle
-from pandas import DataFrame
 from scipy.io import savemat
 from scipy.signal.windows import blackman
 
@@ -78,7 +77,7 @@ class IdentificationCfg:
     filetype : Literal["csv", "mat"], optional
         Choose the filetype for saving identification results, defaults to "csv". Valid
         options are:
-        - "csv": save results in .csv-format, requires `pandas` to be installed
+        - "csv": save results in .csv-format
         - "mat": save results in MATLAB .mat-format
     delay : int, optional
         Number of samples for modeling the computational delay. The default is 1.
@@ -164,10 +163,31 @@ def save_csv(data: IdentificationResults, filename: str) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
         filepath = join("data", timestamp + filename + ".csv")
 
-        # Transform data into pandas DataFrame object
-        df = DataFrame(dict(data.__dict__.items()))
+        # Check if file already exists
+        if exists(filepath):
+            print("Warning: Overwriting already existing file")
 
-        df.to_csv(filepath)
+        # Get field names from the IdentificationResults dataclass
+        field_names = list(data.__dataclass_fields__.keys())
+
+        # Save data to CSV file
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(",".join(field_names) + "\n")
+            n_rows = len(data.f_e)
+
+            for i in range(n_rows):
+                row = []
+                for field_name in field_names:
+                    value = getattr(data, field_name)
+
+                    # Only write scalar values once in the first row
+                    if isinstance(value, np.ndarray):
+                        row.append(str(value[i]))
+                    else:
+                        row.append(str(value) if i == 0 else "")
+
+                f.write(",".join(row) + "\n")
+
         print(f"Data successfully exported to {timestamp + filename}")
 
     except Exception as error:
@@ -186,6 +206,10 @@ def save_mat(data: IdentificationResults, filename: str) -> None:
         # Create the file path
         timestamp = datetime.now().strftime("%Y%m%d_%H.%M_")
         filepath = join("data", timestamp + filename + ".mat")
+
+        # Check if file already exists
+        if exists(filepath):
+            print("Warning: Overwriting already existing file")
 
         savemat(filepath, data_dict)
         print(f"Data successfully exported to {timestamp + filename}")
