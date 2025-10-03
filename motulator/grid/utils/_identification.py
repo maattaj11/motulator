@@ -17,7 +17,7 @@ from scipy.io import savemat
 from scipy.signal.windows import blackman
 
 from motulator.common.utils._plotting import set_latex_style, set_screen_style
-from motulator.common.utils._utils import empty_array
+from motulator.common.utils._utils import empty_array, get_value
 from motulator.grid import control, model, utils
 
 
@@ -45,29 +45,32 @@ class IdentificationCfg:
     n_freqs : int
         Number of frequencies for measurement.
     spacing : str, optional
-        Whether to use logarithmic "log" or linear "lin" spacing for creating
-        the array of measurement frequencies. The default is "log".
+        Whether to use logarithmic "log" or linear "lin" spacing for creating the array
+        of measurement frequencies. The default is "log".
     manual_freqs : ndarray | None, optional
-        Manually specified array of frequencies (Hz) to measure admittance at.
-        If set to None, f_start, f_stop and n_freqs parameters are used to
-        create the array of frequencies. The default is None.
+        Manually specified array of frequencies (Hz) to measure admittance at. If set to
+        None, f_start, f_stop and n_freqs parameters are used to create the array of
+        frequencies. The default is None.
     t0 : float, optional
-        Stop time for initial simulating to the operating point (s). Should be
-        large enough to reach steady-state. The default is 0.1.
+        Stop time for initial simulating to the operating point (s). Should be large
+        enough to reach steady-state. The default is 1.0.
     t1 : float, optional
-        Additional simulation time for reaching steady-state during signal
-        injection (s). The default is 0.02.
+        Additional simulation time for reaching sinusoidal steady-state during signal
+        injection (s). The default is 0.05.
     T_s : float, optional
         Sampling period of the control system (s). The default is 1/10e3.
     N_eval : int, optional
-        Number of evenly spaced data points the solver should return for each
-        controller sampling period. The default is 10.
-    n_periods : int, optional
-        Number of excitation signal periods to use for calculating the DFT. The
-        default is 4.
+        Number of evenly spaced data points the solver should return for each controller
+        sampling period. The default is 10.
+    n_periods_excitation : int, optional
+        Number of excitation signal periods to use for calculating the DFT. The default
+        is 4.
+    n_periods_init : int, optional
+        Number of fundamental periods to include for calculating operating-point
+        vectors. The default is 1.
     multiprocess : bool, optional
-        If set to True, multiprocessing.Pool() is used to run the
-        identification using parallel threads. The default is True.
+        If set to True, multiprocessing.Pool() is used to run the identification using
+        parallel threads. The default is True.
     filename : str | None, optional
         If given, the identification result is saved in */data/{date}_{time}_{filename}
         where * is the project root directory, defaults to None. The file format is set
@@ -78,11 +81,10 @@ class IdentificationCfg:
         - "csv": save results in .csv-format, requires `pandas` to be installed
         - "mat": save results in MATLAB .mat-format
     delay : int, optional
-        Number of samples for modeling the computational delay. The default
-        is 1.
+        Number of samples for modeling the computational delay. The default is 1.
     k_comp : float, optional
-        Compensation factor for the delay effect on the converter output
-        voltage vector angle. The default is 1.5.
+        Compensation factor for the delay effect on the converter output voltage vector
+        angle. The default is 1.5.
     use_window : bool, optional
         Whether to use window function for calculating DFT. Defaults to True.
     variable_amplitude : bool, optional
@@ -98,11 +100,12 @@ class IdentificationCfg:
     n_freqs: int = 100
     spacing: str = "log"
     manual_freqs: np.ndarray | None = None
-    t0: float = 0.5
-    t1: float = 0.1
+    t0: float = 1.0
+    t1: float = 0.05
     T_s: float = 1 / 10e3
     N_eval: int = 10
-    n_periods: int = 4
+    n_periods_excitation: int = 4
+    n_periods_init: int = 1
     multiprocess: bool = True
     filename: str | None = None
     filetype: Literal["csv", "mat"] = "csv"
@@ -191,21 +194,26 @@ def save_mat(data: IdentificationResults, filename: str) -> None:
         print(f"Error saving data: {str(error)}")
 
 
-def dft(cfg: IdentificationCfg, u: np.ndarray, f_e: float) -> complex:
+def dft(
+    cfg: IdentificationCfg, u: np.ndarray, f: float, initial_simulation: bool = False
+) -> complex:
     """
     Single-frequency discrete Fourier transform.
 
-    Calculates the frequency component y at frequency f_e from input
-    signal u, using the discrete Fourier transform algorithm.
+    Calculates the frequency component y at frequency f from input signal u, using the
+    discrete Fourier transform algorithm.
 
     """
-
-    n = int(cfg.n_periods * cfg.N_eval / (f_e * cfg.T_s))
-    u = u[-n:] * blackman(n, False) if cfg.use_window else u[-n:]
+    n_periods = cfg.n_periods_init if initial_simulation else cfg.n_periods_excitation
+    n = int(n_periods * cfg.N_eval / (f * cfg.T_s))
+    if cfg.use_window and not initial_simulation:
+        u = u[-n:] * blackman(n, False)
+    else:
+        u = u[-n:]
     y = (
         2
         / n
-        * np.sum(u * np.exp(-2j * np.pi * f_e * cfg.T_s / cfg.N_eval * np.arange(n)))
+        * np.sum(u * np.exp(-2j * np.pi * f * cfg.T_s / cfg.N_eval * np.arange(n)))
     )
     return y
 
@@ -236,22 +244,24 @@ def pre_process(
         ctrl.set_ac_voltage_ref(cfg.op_point["v_c"])
 
     # Create Simulation object and simulate
+    T_nom = 2 * np.pi / get_value(mdl.ac_source.w_g, 0)
+    t_stop = np.ceil(cfg.t0 / T_nom) * T_nom + cfg.n_periods_init * T_nom
     sim = model.Simulation(mdl, ctrl, show_progress=False)
-    res = sim.simulate(t_stop=cfg.t0)
+    res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
-    # Calculate operating point
-    exp_j_theta_g0 = res.mdl.ac_source.exp_j_theta_g[-1]
-    i_g0 = res.mdl.ac_filter.i_g_ab[-1] * np.conj(exp_j_theta_g0)
-    e_g0 = res.mdl.ac_filter.e_g_ab[-1] * np.conj(exp_j_theta_g0)
-    u_g0 = res.mdl.ac_filter.u_g_ab[-1] * np.conj(exp_j_theta_g0)
-    u_c0 = res.mdl.ac_filter.u_c_ab[-1] * np.conj(exp_j_theta_g0)
+    # Calculate fundamental-frequency quantities in the operating point
+    f_nom = get_value(mdl.ac_source.w_g, 0) * 0.5 / np.pi
+    i_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.i_g_ab, f_nom, initial_simulation=True))
+    e_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.e_g_ab, f_nom, initial_simulation=True))
+    u_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.u_g_ab, f_nom, initial_simulation=True))
+    u_c0 = 0.5 * (dft(cfg, res.mdl.ac_filter.u_c_ab, f_nom, initial_simulation=True))
 
     # Align coordinates with PCC voltage vector
-    phi_g = np.angle(u_g0) - np.angle(e_g0)
-    i_g0 = i_g0 * np.exp(-1j * phi_g)
-    e_g0 = e_g0 * np.exp(-1j * phi_g)
-    u_g0 = u_g0 * np.exp(-1j * phi_g)
-    u_c0 = u_c0 * np.exp(-1j * phi_g)
+    theta = np.angle(u_g0)
+    i_g0 = i_g0 * np.exp(-1j * theta)
+    e_g0 = e_g0 * np.exp(-1j * theta)
+    u_g0 = u_g0 * np.exp(-1j * theta)
+    u_c0 = u_c0 * np.exp(-1j * theta)
 
     operating_point = [i_g0, e_g0, u_g0, u_c0]
 
@@ -268,7 +278,7 @@ def identify(
     mdl.ac_source.f_e = f_e
     mdl.ac_source.u_ed = cfg.amplitudes[i]
     # Set new stop time and simulate
-    t_stop = mdl.t0 + cfg.t1 + cfg.n_periods / f_e
+    t_stop = mdl.t0 + cfg.t1 + cfg.n_periods_excitation / f_e
     sim_d = model.Simulation(mdl, ctrl, show_progress=False)
     res_d = sim_d.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 

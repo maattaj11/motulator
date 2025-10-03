@@ -142,18 +142,20 @@ class SignalInjectionStateHistory:
 
 class ThreePhaseSourceWithSignalInjection(Subsystem):
     """
-    Three-phase source model with additional signal injection in dq-frame.
+    Three-phase source model with additional signal injection in dq-coordinates.
 
-    The frequency, phase shift, and magnitude can be given either as constants or
-    functions of time. The zero-sequence component is not included in this model.
+    This class implements a three-phase voltage source model with signal injection
+    capabilities, intended for use in converter output admittance identification. The
+    excitation signal is added to the output voltage of the source. The zero-sequence
+    component is not included in this model.
 
     Parameters
     ----------
-    w_g : float | Callable[[float], float], optional
+    w_g : float, optional
         Angular frequency (rad/s), defaults to 2*pi*50.
-    e_g : float | Callable[[float], float], optional
+    e_g : float, optional
         Peak-valued magnitude of positive-sequence component, defaults to sqrt(2/3)*400.
-    phi : float | Callable[[float], float], optional
+    phi : float, optional
         Phase shift (rad) of positive-sequence component, defaults to 0.
     u_ed : float, optional
         Magnitude of d-axis excitation signal (V), defaults to 0.
@@ -169,9 +171,9 @@ class ThreePhaseSourceWithSignalInjection(Subsystem):
 
     def __init__(
         self,
-        w_g: float | Callable[[float], float] = 2 * pi * 50,
-        e_g: float | Callable[[float], float] = sqrt(2 / 3) * 400,
-        phi: float | Callable[[float], float] = 0.0,
+        w_g: float = 2 * pi * 50,
+        e_g: float = sqrt(2 / 3) * 400,
+        phi: float = 0.0,
         u_ed: float = 0.0,
         u_eq: float = 0.0,
         f_e: float = 0.0,
