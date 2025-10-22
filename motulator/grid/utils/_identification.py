@@ -28,13 +28,6 @@ class IdentificationCfg:
 
     Parameters
     ----------
-    op_point : dict[Literal["p_g", "q_g", "v_c", "u_dc"], float]
-        Dictionary object containing key-value pairs for reference signals in the
-        operating point. Valid options for the dictionary keys are:
-        - "p_g"
-        - "q_g"
-        - "v_c"
-        - "u_dc"
     abs_u_e : float
         Magnitude of the voltage excitation (V).
     f_start : float
@@ -43,9 +36,11 @@ class IdentificationCfg:
         End frequency of the voltage excitation (Hz).
     n_freqs : int
         Number of frequencies for measurement.
-    spacing : str, optional
-        Whether to use logarithmic "log" or linear "lin" spacing for creating the array
-        of measurement frequencies. The default is "log".
+    spacing : Literal["log", "lin"], optional
+        The spacing used for creating the array of measurement frequencies, defaults to
+        "log". Valid options are:
+        - "log": logarithmic spacing
+        - "lin": linear spacing
     manual_freqs : ndarray | None, optional
         Manually specified array of frequencies (Hz) to measure admittance at. If set to
         None, f_start, f_stop and n_freqs parameters are used to create the array of
@@ -75,8 +70,8 @@ class IdentificationCfg:
         where * is the project root directory, defaults to None. The file format is set
         by the `filetype` parameter.
     filetype : Literal["csv", "mat"], optional
-        Choose the filetype for saving identification results, defaults to "csv". Valid
-        options are:
+        The filetype for saving identification results, defaults to "csv". Valid options
+        are:
         - "csv": save results in .csv-format
         - "mat": save results in MATLAB .mat-format
     delay : int, optional
@@ -89,15 +84,18 @@ class IdentificationCfg:
     variable_amplitude : bool, optional
         Whether to increase the excitation signal amplitude with the frequency. Defaults
         to True.
+    amplitude_multiplier : float, optional
+        Gain value to set how much the excitation signal amplitude is increased at the
+        highest frequency compared to the lowest if `variable_amplitude` is set to True.
+        Defaults to 5.0.
 
     """
 
-    op_point: dict[Literal["p_g", "q_g", "v_c", "u_dc"], float]
     abs_u_e: float
     f_start: float = 1
     f_stop: float = 10e3
     n_freqs: int = 100
-    spacing: str = "log"
+    spacing: Literal["log", "lin"] = "log"
     manual_freqs: np.ndarray | None = None
     t0: float = 1.0
     t1: float = 0.05
@@ -112,6 +110,7 @@ class IdentificationCfg:
     k_comp: float = 1.5
     use_window: bool = True
     variable_amplitude: bool = True
+    amplitude_multiplier: float = 5.0
 
     def __post_init__(self) -> None:
         # Create array of frequencies if not specified
@@ -124,7 +123,9 @@ class IdentificationCfg:
             self.freqs = self.manual_freqs
         # Increase excitation signal amplitude with the frequency if configured
         if self.variable_amplitude:
-            self.amplitudes = self.abs_u_e * np.linspace(1.0, 5.0, np.size(self.freqs))
+            self.amplitudes = self.abs_u_e * np.linspace(
+                1.0, self.amplitude_multiplier, np.size(self.freqs)
+            )
         else:
             self.amplitudes = np.full(np.size(self.freqs), self.abs_u_e)
 
@@ -257,24 +258,15 @@ def pre_process(
 ) -> tuple[model.Simulation, list[Any]]:
     """Simulate the system to the desired operating point."""
 
-    # Set appropriate references
-    if isinstance(ctrl.dc_bus_voltage_ctrl, control.DCBusVoltageController):
-        ctrl.set_dc_bus_voltage_ref(cfg.op_point["u_dc"])
-    else:
-        ctrl.set_power_ref(cfg.op_point["p_g"])
-    if isinstance(ctrl.inner_ctrl, control.CurrentVectorController):
-        ctrl.set_reactive_power_ref(cfg.op_point["q_g"])
-    if isinstance(ctrl.inner_ctrl, control.ObserverBasedGridFormingController):
-        ctrl.set_ac_voltage_ref(cfg.op_point["v_c"])
-
     # Create Simulation object and simulate
-    T_nom = 2 * np.pi / get_value(mdl.ac_source.w_g, 0)
+    w_g = get_value(mdl.ac_source.w_g, 0)
+    T_nom = 2 * np.pi / w_g
     t_stop = np.ceil(cfg.t0 / T_nom) * T_nom + cfg.n_periods_init * T_nom
-    sim = model.Simulation(mdl, ctrl, show_progress=False)
+    sim = model.Simulation(deepcopy(mdl), deepcopy(ctrl), show_progress=False)
     res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
     # Calculate fundamental-frequency quantities in the operating point
-    f_nom = get_value(mdl.ac_source.w_g, 0) * 0.5 / np.pi
+    f_nom = w_g * 0.5 / np.pi
     i_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.i_g_ab, f_nom, initial_simulation=True))
     e_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.e_g_ab, f_nom, initial_simulation=True))
     u_g0 = 0.5 * (dft(cfg, res.mdl.ac_filter.u_g_ab, f_nom, initial_simulation=True))
@@ -286,6 +278,15 @@ def pre_process(
     e_g0 = e_g0 * np.exp(-1j * theta)
     u_g0 = u_g0 * np.exp(-1j * theta)
     u_c0 = u_c0 * np.exp(-1j * theta)
+
+    # Create new system model and simulate to steady state
+    converter = deepcopy(mdl.converter)
+    ac_filter = deepcopy(mdl.ac_filter)
+    ac_filter.L_g = 0.0
+    ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=w_g, e_g=np.abs(u_g0))
+    mdl = model.GridConverterSystem(converter, ac_filter, ac_source, delay=cfg.delay)
+    sim = model.Simulation(mdl, ctrl, show_progress=False)
+    sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
 
     operating_point = [i_g0, e_g0, u_g0, u_c0]
 
@@ -348,27 +349,12 @@ def post_process(
 ) -> IdentificationResults:
     """Save the identification results and information about the operating point."""
     results_array = np.vstack(results)
-
-    # Align the output admittance matrix with the operating-point PCC voltage vector
-    I = np.eye(2)  # noqa: E741
-    J = np.array([[0, -1], [1, 0]])
-    theta = np.angle(operating_point[2]) - np.angle(operating_point[1])
-    R1 = np.cos(theta) * I - np.sin(theta) * J
-    R2 = np.cos(theta) * I + np.sin(theta) * J
-    Y_cp = np.array(
-        [
-            [results_array[:, 2], results_array[:, 3]],
-            [results_array[:, 4], results_array[:, 5]],
-        ]
-    )
-    Y_cp = np.moveaxis(Y_cp, -1, 0)
-    Y_c = R1 @ Y_cp @ R2
     res = IdentificationResults(
         f_e=np.real(results_array[:, 1]),
-        Y_dd=Y_c[:, 0, 0],
-        Y_qd=Y_c[:, 0, 1],
-        Y_dq=Y_c[:, 1, 0],
-        Y_qq=Y_c[:, 1, 1],
+        Y_dd=results_array[:, 2],
+        Y_qd=results_array[:, 3],
+        Y_dq=results_array[:, 4],
+        Y_qq=results_array[:, 5],
         i_g0=operating_point[0],
         e_g0=operating_point[1],
         u_g0=operating_point[2],
@@ -418,7 +404,7 @@ def run_identification(
                 )
                 async_results.append(async_result)
             # Wait for all tasks to complete
-            [res.get() for res in async_results]
+            [result.get() for result in async_results]
         # Sort the results list along the first element (index i)
         results.sort(key=lambda x: x[0])
     else:
@@ -429,14 +415,14 @@ def run_identification(
 
     if show_progress:
         print(f"\nExecution time: {(time() - t_start):.2f} s")
-    data = post_process(results, operating_point)
+    res = post_process(results, operating_point)
     if cfg.filename is not None:
         if cfg.filetype == "csv":
-            save_csv(data, cfg.filename)
+            save_csv(res, cfg.filename)
         elif cfg.filetype == "mat":
-            save_mat(data, cfg.filename)
+            save_mat(res, cfg.filename)
 
-    return data
+    return res
 
 
 # %%

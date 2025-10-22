@@ -26,7 +26,6 @@ base = utils.BaseValues.from_nominal(nom)
 # Configure the identification.
 
 identification_cfg = IdentificationCfg(
-    op_point={"p_g": 0.5 * base.p, "v_c": base.u},
     abs_u_e=0.01 * base.u,
     f_start=1,
     f_stop=10e3,
@@ -41,8 +40,8 @@ identification_cfg = IdentificationCfg(
 # %%
 # Configure the system model.
 
-ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0 * base.L)
-ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=base.w, e_g=base.u)
+ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.74 * base.L)
+ac_source = model.ThreePhaseSource(w_g=base.w, e_g=base.u)
 converter = model.VoltageSourceConverter(u_dc=650)
 mdl = model.GridConverterSystem(
     converter, ac_filter, ac_source, delay=identification_cfg.delay
@@ -62,6 +61,9 @@ inner_ctrl = control.ObserverBasedGridFormingController(
     T_s=identification_cfg.T_s,
 )
 ctrl = control.GridConverterControlSystem(inner_ctrl)
+
+ctrl.set_power_ref(0.5 * base.p)
+ctrl.set_ac_voltage_ref(base.u)
 
 # %%
 # Run the identification and plot results.
