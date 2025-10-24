@@ -15,6 +15,7 @@ from matplotlib.patches import Circle
 from scipy.io import savemat
 from scipy.signal.windows import blackman
 
+from motulator.common.model._pwm import CarrierComparison
 from motulator.common.utils._plotting import set_latex_style, set_screen_style
 from motulator.common.utils._utils import empty_array, get_value
 from motulator.grid import control, model, utils
@@ -30,12 +31,14 @@ class IdentificationCfg:
     ----------
     abs_u_e : float
         Magnitude of the voltage excitation (V).
-    f_start : float
-        Starting frequency of the voltage excitation (Hz).
-    f_stop : float
-        End frequency of the voltage excitation (Hz).
-    n_freqs : int
-        Number of frequencies for measurement.
+    f_start : float, optional
+        Starting frequency of the voltage excitation (Hz, in dq-coordinates), defaults
+        to 1.
+    f_stop : float, optional
+        End frequency of the voltage excitation (Hz, in dq-coordinates), defaults to
+        10e3.
+    n_freqs : int, optional
+        Number of frequencies for measurement, defaults to 100.
     spacing : Literal["log", "lin"], optional
         The spacing used for creating the array of measurement frequencies, defaults to
         "log". Valid options are:
@@ -44,27 +47,26 @@ class IdentificationCfg:
     manual_freqs : ndarray | None, optional
         Manually specified array of frequencies (Hz) to measure admittance at. If set to
         None, f_start, f_stop and n_freqs parameters are used to create the array of
-        frequencies. The default is None.
+        frequencies. Defaults to None.
     t0 : float, optional
-        Stop time for initial simulating to the operating point (s). Should be large
-        enough to reach steady-state. The default is 1.0.
+        Stop time for initial simulating to the operating point (s), defaults to 1.0.
+        Should be set large enough to reach steady-state.
     t1 : float, optional
         Additional simulation time for reaching sinusoidal steady-state during signal
-        injection (s). The default is 0.05.
+        injection (s), defaults to 0.05.
     T_s : float, optional
-        Sampling period of the control system (s). The default is 1/10e3.
+        Sampling period of the control system (s), defaults to 125e-6.
     N_eval : int, optional
         Number of evenly spaced data points the solver should return for each controller
-        sampling period. The default is 10.
+        sampling period, defaults to 10.
     n_periods_excitation : int, optional
-        Number of excitation signal periods to use for calculating the DFT. The default
-        is 4.
+        Number of excitation signal periods used in calculating the DFT, defaults to 4.
     n_periods_init : int, optional
         Number of fundamental periods to include for calculating operating-point
-        vectors. The default is 1.
+        vectors, defaults to 1.
     multiprocess : bool, optional
         If set to True, multiprocessing.Pool() is used to run the identification using
-        parallel threads. The default is True.
+        all available CPU cores in the system. Defaults to True.
     filename : str | None, optional
         If given, the identification result is saved in */data/{date}_{time}_{filename}
         where * is the project root directory, defaults to None. The file format is set
@@ -75,14 +77,11 @@ class IdentificationCfg:
         - "csv": save results in .csv-format
         - "mat": save results in MATLAB .mat-format
     delay : int, optional
-        Number of samples for modeling the computational delay. The default is 1.
-    k_comp : float, optional
-        Compensation factor for the delay effect on the converter output voltage vector
-        angle. The default is 1.5.
+        Number of samples for modeling the computational delay, defaults to 1.
     use_window : bool, optional
-        Whether to use window function for calculating DFT. Defaults to True.
+        Whether to use window function for calculating DFT, defaults to True.
     variable_amplitude : bool, optional
-        Whether to increase the excitation signal amplitude with the frequency. Defaults
+        Whether to increase the excitation signal amplitude with the frequency, defaults
         to True.
     amplitude_multiplier : float, optional
         Gain value to set how much the excitation signal amplitude is increased at the
@@ -99,7 +98,7 @@ class IdentificationCfg:
     manual_freqs: np.ndarray | None = None
     t0: float = 1.0
     t1: float = 0.05
-    T_s: float = 1 / 10e3
+    T_s: float = 125e-6
     N_eval: int = 10
     n_periods_excitation: int = 4
     n_periods_init: int = 1
@@ -107,7 +106,6 @@ class IdentificationCfg:
     filename: str | None = None
     filetype: Literal["csv", "mat"] = "csv"
     delay: int = 1
-    k_comp: float = 1.5
     use_window: bool = True
     variable_amplitude: bool = True
     amplitude_multiplier: float = 5.0
@@ -264,6 +262,7 @@ def pre_process(
     t_stop = np.ceil(cfg.t0 / T_nom) * T_nom + cfg.n_periods_init * T_nom
     sim = model.Simulation(deepcopy(mdl), deepcopy(ctrl), show_progress=False)
     res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
+    utils.plot_control_signals(res)
 
     # Calculate fundamental-frequency quantities in the operating point
     f_nom = w_g * 0.5 / np.pi
@@ -284,9 +283,13 @@ def pre_process(
     ac_filter = deepcopy(mdl.ac_filter)
     ac_filter.L_g = 0.0
     ac_source = model.ThreePhaseSourceWithSignalInjection(w_g=w_g, e_g=np.abs(u_g0))
-    mdl = model.GridConverterSystem(converter, ac_filter, ac_source, delay=cfg.delay)
+    pwm = isinstance(mdl.pwm, CarrierComparison)
+    mdl = model.GridConverterSystem(
+        converter, ac_filter, ac_source, pwm=pwm, delay=cfg.delay
+    )
     sim = model.Simulation(mdl, ctrl, show_progress=False)
-    sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
+    res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
+    utils.plot_control_signals(res)
 
     operating_point = [i_g0, e_g0, u_g0, u_c0]
 
@@ -369,7 +372,25 @@ def run_identification(
     mdl: model.GridConverterSystem,
     ctrl: control.GridConverterControlSystem,
 ) -> IdentificationResults:
-    """Run the identification."""
+    """
+    Run the identification.
+
+    Parameters
+    ----------
+    cfg : IdentificationCfg
+        Dataclass object containing the identification configuration.
+    mdl : GridConverterSystem
+        Continuous-time system model object.
+    ctrl : GridConverterControlSystem
+        Discrete-time control system object.
+
+    Returns
+    -------
+    res : IdentificationResults
+        Dataclass object containing the results from the identification, along with
+        information about the operating point.
+
+    """
     results = []
     sim_op, operating_point = pre_process(cfg, mdl, ctrl)
     t_start = time()
