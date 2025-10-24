@@ -32,7 +32,6 @@ identification_cfg = IdentificationCfg(
     f_start=1,
     f_stop=10e3,
     n_freqs=100,
-    multiprocess=True,
     T_s=1 / 10e3,
     # Uncomment the row below to save identification results in "project root"/data
     # filename="gfl_dc-bus_admittance",

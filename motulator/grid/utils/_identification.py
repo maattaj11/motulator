@@ -262,7 +262,6 @@ def pre_process(
     t_stop = np.ceil(cfg.t0 / T_nom) * T_nom + cfg.n_periods_init * T_nom
     sim = model.Simulation(deepcopy(mdl), deepcopy(ctrl), show_progress=False)
     res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
-    utils.plot_control_signals(res)
 
     # Calculate fundamental-frequency quantities in the operating point
     f_nom = w_g * 0.5 / np.pi
@@ -289,7 +288,6 @@ def pre_process(
     )
     sim = model.Simulation(mdl, ctrl, show_progress=False)
     res = sim.simulate(t_stop=t_stop, N_eval=cfg.N_eval)
-    utils.plot_control_signals(res)
 
     operating_point = [i_g0, e_g0, u_g0, u_c0]
 
@@ -301,7 +299,7 @@ def identify(
 ) -> list[Any]:
     """Calculate the output admittance at a single frequency."""
 
-    # 1) d-axis injection
+    # 1: d-axis injection
     mdl, ctrl = copy_state(sim)
     mdl.ac_source.f_e = f_e
     mdl.ac_source.u_ed = cfg.amplitudes[i]
@@ -319,7 +317,7 @@ def identify(
     i_gd1 = dft(cfg, i_g1.real, f_e)
     i_gq1 = dft(cfg, i_g1.imag, f_e)
 
-    # 2) q-axis injection
+    # 2: q-axis injection
     mdl, ctrl = copy_state(sim)
     mdl.ac_source.f_e = f_e
     mdl.ac_source.u_eq = cfg.amplitudes[i]

@@ -30,10 +30,9 @@ identification_cfg = IdentificationCfg(
     f_start=1,
     f_stop=10e3,
     n_freqs=100,
-    multiprocess=True,
     T_s=1 / 10e3,
     # Uncomment the row below to save identification results in "project root"/data
-    # filename="do-gfm_admittance",
+    # filename="do-gfm_admittance_p0.5_Lg0.74",
     filetype="csv",
 )
 
@@ -43,9 +42,7 @@ identification_cfg = IdentificationCfg(
 ac_filter = model.LFilter(L_f=0.15 * base.L, L_g=0.74 * base.L)
 ac_source = model.ThreePhaseSource(w_g=base.w, e_g=base.u)
 converter = model.VoltageSourceConverter(u_dc=650)
-mdl = model.GridConverterSystem(
-    converter, ac_filter, ac_source, delay=identification_cfg.delay
-)
+mdl = model.GridConverterSystem(converter, ac_filter, ac_source)
 
 # %%
 # Configure the control system.

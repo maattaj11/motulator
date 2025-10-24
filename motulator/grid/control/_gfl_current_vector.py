@@ -198,7 +198,7 @@ class CurrentVectorController:
 
     def update(self, ref: References, fbk: PLLOutputSignals) -> None:
         """Update states."""
-        self.current_ctrl.update(ref.T_s, fbk.u_c, fbk.w_c)
+        self.current_ctrl.update(ref.T_s, ref.u_c, fbk.w_c)
         self.pll.update(ref.T_s, fbk)
 
     def post_process(self, ts: TimeSeries) -> None:

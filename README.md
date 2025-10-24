@@ -6,6 +6,21 @@
 [![PyPI version shields.io](https://img.shields.io/pypi/v/motulator.svg)](https://pypi.org/project/motulator/)
 [![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
 
+## Information regarding this archived branch
+
+This branch is for purpose of archiving the identification method and version of *motulator* used in (add link here). Example scripts demonstrating the usage of the identification method can be found in
+```
+examples/grid/identification/
+```
+The identification method itself, along with scripts for calculating and plotting analytical solutions, can be found in
+```
+motulator/grid/utils/
+```
+To run the identification examples, the repository can be cloned using the installation instructions found below. To calculate the analytical solutions, the sympy package is also required, which can be installed by running the following in the created virtual environment.
+```bash
+pip install sympy
+```
+
 ## Introduction
 
 This open-source software includes simulation models and controllers for electric machine drives and grid converter systems. The machine models include an induction machine, a synchronous reluctance machine, and a permanent-magnet synchronous machine. Various subsystem models are provided for modeling grid converter systems, such as an LCL filter connected to an inductive-resistive grid.
@@ -16,13 +31,7 @@ https://aalto-electric-drives.github.io/motulator/
 
 ## Installation
 
-This software can be installed using pip:
-
-```bash
-pip install motulator
-```
-
-Alternatively, the repository can be cloned:
+The repository can be cloned using the instructions found in:
 
 https://aalto-electric-drives.github.io/motulator/installation.html
 
