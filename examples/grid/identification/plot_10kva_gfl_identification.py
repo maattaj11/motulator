@@ -1,6 +1,6 @@
 """
 10-kVA, GFL, converter output admittance identification
-============================================================
+=======================================================
 
 This example demonstrates converter output admittance identification using a 10-kVA
 grid-following (GFL) converter.

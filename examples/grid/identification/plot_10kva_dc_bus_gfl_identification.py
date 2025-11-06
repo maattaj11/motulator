@@ -1,6 +1,6 @@
 """
 10-kVA, DC-bus, GFL, converter output admittance identification
-============================================================
+===============================================================
 
 This example demonstrates converter output admittance identification using a 10-kVA
 grid-following (GFL) converter, using dc-bus voltage control mode.
