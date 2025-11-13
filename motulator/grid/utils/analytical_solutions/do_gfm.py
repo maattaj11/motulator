@@ -62,16 +62,13 @@ K_o = alpha_o * I - omegahat_g * J
 # Calculate auxiliary variables
 K_1 = 3 / 2 * k_p0 * i_g0.T + 1 / vhat_c0mag * k_v0 * vhat_c0.T
 K_2 = 3 / 2 * k_p0 * vhat_c0.T
-G_v = (s * I + (omegahat_g * J + K_o) * K_1) ** -1 * (
+G_i = (I - K_1) * (s * I + (omegahat_g * J + K_o) * K_1) ** -1 * (
     (omegahat_g * J + K_o) * K_2 + s * Lhat_t * K_o
-)
+) + K_2
 Z_f = s * L_f * I + omega_g * L_f * J
 
 # Calculate inverse of output admittance matrix
-Y_c_inv = Z_f + exp(-s * T_d) * (
-    (I - 1.5 * k_p0 * i_g0.T - 1 / vhat_c0mag * k_v0 * vhat_c0.T) * G_v
-    + 1.5 * k_p0 * vhat_c0.T
-)
+Y_c_inv = Z_f + exp(-s * T_d) * G_i
 Y_c_inv = Y_c_inv.subs(s, 1j * omega)
 
 # Convert to numpy array and compute output admittance

@@ -28,7 +28,7 @@ L_f = 0.2 * base.L
 p_g0 = 0.5 * base.p
 q_g0 = 0.5 * base.p
 
-# Calculate other operating-point quantities
+# Calculate other operating-point quantities, L_g=0 is assumed
 u_gmag0 = base.u
 i_gd0 = 2 * p_g0 / (3 * u_gmag0)
 i_gq0 = -2 * q_g0 / (3 * u_gmag0)
@@ -52,38 +52,42 @@ alpha_pll = 2 * np.pi * 20
 k_p = (alpha_c + alpha_i) * Lhat
 k_i = alpha_c * alpha_i * Lhat
 k_t = alpha_c * Lhat
-k_omega = alpha_pll**2
-alpha_g = 2 * alpha_pll
 
 # Calculate auxiliary variables
-G_theta = 1 / u_gmag0 * (alpha_g * s + k_omega) / (s**2 + alpha_g * s + k_omega)
-G_c = (k_p + k_i / s) * I + k_t / s * omega_c0 * J
-G_v = Matrix(
+G_theta = (
+    1
+    / u_gmag0
+    * (2 * alpha_pll * s + alpha_pll**2)
+    / (s**2 + 2 * alpha_pll * s + alpha_pll**2)
+)
+G_u = Matrix(
     [
         [
-            alpha_g / (s + alpha_g)
+            2 * alpha_pll / (s + 2 * alpha_pll)
             - 1
             / u_gmag0
-            * alpha_g
-            / (s * (s + alpha_g))
+            * 2
+            * alpha_pll
+            / (s * (s + 2 * alpha_pll))
             * (k_i * i_gd0 - k_t * omega_c0 * i_gq0),
             -G_theta * (k_t / s * omega_c0 * i_gd0 + (k_p + k_i / s) * i_gq0 + u_cq0),
         ],
         [
             -1
             / u_gmag0
-            * alpha_g
-            / (s * (s + alpha_g))
+            * 2
+            * alpha_pll
+            / (s * (s + 2 * alpha_pll))
             * (k_t * omega_c0 * i_gd0 + k_i * i_gq0),
             G_theta * ((k_p + k_i / s) * i_gd0 - k_t / s * omega_c0 * i_gq0 + u_cd0),
         ],
     ]
 )
-
+G_i = (k_p + k_i / s) * I + k_t / s * omega_c0 * J
 Z_f = s * L_f * I + omega_g * L_f * J
 
 # Calculate output admittance
-Y_c = (Z_f + exp(-s * T_d) * G_c) ** -1 * (I - exp(-s * T_d) * G_v)
+Y_c = (Z_f + exp(-s * T_d) * G_i) ** -1 * (I - exp(-s * T_d) * G_u)
 Y_c = Y_c.subs(s, 1j * omega)
 
 # Convert to numpy array
