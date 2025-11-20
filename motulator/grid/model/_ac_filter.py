@@ -8,6 +8,7 @@ implemented with space vectors in stationary coordinates.
 """
 
 from dataclasses import InitVar, dataclass, field
+from math import sqrt
 from typing import Any
 
 import numpy as np
@@ -307,6 +308,157 @@ class LCLFilterTimeSeries(SubsystemTimeSeries):
 
     def compute_input_derived_signals(
         self, t: np.ndarray, subsystem: LCLFilter
+    ) -> None:
+        """Process input time series."""
+        self.u_g_ab = subsystem.pcc_voltage(self, self)
+
+
+@dataclass
+class LFilterLCLGridStates:
+    """State variables."""
+
+    i_c_ab: complex = 0j
+    u_fg_ab: complex = 0j
+    i_g_ab: complex = 0j
+
+
+@dataclass
+class LFilterLCLGridOutputs:
+    """Base class for outputs."""
+
+    i_c_ab: complex
+    i_g_ab: complex
+
+
+@dataclass
+class LFilterLCLGridStateHistory:
+    """State history."""
+
+    i_c_ab: list[complex] = field(default_factory=list)
+    u_fg_ab: list[complex] = field(default_factory=list)
+    i_g_ab: list[complex] = field(default_factory=list)
+
+
+class LFilterLCLGrid(Subsystem):
+    """
+    Model of an L filter and an LCL grid.
+
+    An L filter and an LCL grid, between the converter and grid voltage
+    sources, are modeled. The point-of-common-coupling (PCC) voltage between the L
+    filter and the converter-side grid inductance is calculated.
+
+    Parameters
+    ----------
+    L_f : float
+        Filter inductance (H).
+    R_f : float, optional
+        Series resistance (Ω) of the filter inductor, defaults to 0.
+    L_g : float, optional
+        Grid inductance (H), defaults to 0.
+    R_g : float, optional
+        Grid resistance (Ω), defaults to 0.
+
+    """
+
+    def __init__(
+        self,
+        L_f: float,
+        C_g: float,
+        R_f: float = 0.0,
+        L_g: float = 0.0,
+        R_g: float = 0.0,
+        u_g0_ab: complex = complex(sqrt(2 / 3) * 400),
+    ) -> None:
+        self.L_f = L_f
+        self.C_g = C_g
+        self.R_f = R_f
+        self.L_g = L_g
+        self.R_g = R_g
+        # The following initial conditions are needed for computing the PCC voltage,
+        # which has direct feedthrough. The PCC voltage is used only as a feedback
+        # signal for the control system (but not coupled to the solution of the
+        # continuous-time system). If the transients during the very first time steps
+        # are important, these initial conditions can be set to appropriate values.
+        self.inp: Inputs = Inputs()
+        self.state: LFilterLCLGridStates = LFilterLCLGridStates(0j, u_g0_ab, 0j)
+        self.out: LFilterLCLGridOutputs = LFilterLCLGridOutputs(
+            self.state.i_c_ab, self.state.i_g_ab
+        )
+        self._history: LFilterLCLGridStateHistory = LFilterLCLGridStateHistory()
+
+    def pcc_voltage(self, state: Any, inp: Any) -> Any:
+        """Compute the voltage at the point of common coupling (PCC)."""
+        L_t = self.L_f + 0.5 * self.L_g
+        u_g_ab = (
+            0.5 * self.L_g * (inp.u_c_ab - self.R_f * state.i_c_ab)
+            + self.L_f * (state.u_fg_ab + 0.5 * self.R_g * state.i_c_ab)
+        ) / L_t
+        return u_g_ab
+
+    def set_outputs(self, t: float) -> None:
+        """Set output variables."""
+        self.out.i_c_ab = self.state.i_c_ab
+        self.out.i_g_ab = self.state.i_g_ab
+
+    def rhs(self, t: float) -> list[complex]:
+        """Compute the state derivatives."""
+        state = self.state
+        inp = self.inp
+        # Total inductance and resistance
+        L_t = self.L_f + 0.5 * self.L_g
+        R_t = self.R_f + 0.5 * self.R_g
+        # State equations
+        d_i_c_ab = (inp.u_c_ab - state.u_fg_ab - R_t * state.i_c_ab) / L_t
+        d_u_fg_ab = (state.i_c_ab - state.i_g_ab) / self.C_g
+        d_i_g_ab = (state.u_fg_ab - inp.e_g_ab - 0.5 * self.R_g * state.i_g_ab) / (
+            0.5 * self.L_g
+        )
+        return [d_i_c_ab, d_u_fg_ab, d_i_g_ab]
+
+    def meas_currents(self) -> Any:
+        """Measure the converter phase currents (A)."""
+        return complex2abc(self.state.i_c_ab)
+
+    def meas_pcc_voltages(self) -> Any:
+        """Measure the phase voltages (V) at the PCC."""
+        u_g_ab = self.pcc_voltage(self.state, self.inp)
+        return complex2abc(u_g_ab)
+
+    def meas_grid_currents(self) -> Any:
+        """Measure the grid phase currents (A)."""
+        return complex2abc(self.state.i_g_ab)
+
+    def create_time_series(
+        self, t: np.ndarray
+    ) -> tuple[str, "LFilterLCLGridTimeSeries"]:
+        """Create time series from state list."""
+        return "ac_filter", LFilterLCLGridTimeSeries(t, self)
+
+
+@dataclass
+class LFilterLCLGridTimeSeries(SubsystemTimeSeries):
+    """Continuous time series."""
+
+    t: InitVar[np.ndarray]
+    subsystem: InitVar[LFilterLCLGrid]
+    # States
+    i_c_ab: np.ndarray = field(default_factory=empty_array)
+    u_fg_ab: np.ndarray = field(default_factory=empty_array)
+    i_g_ab: np.ndarray = field(default_factory=empty_array)
+    # Inputs
+    u_c_ab: np.ndarray = field(default_factory=empty_array)
+    e_g_ab: np.ndarray = field(default_factory=empty_array)
+    # Outputs
+    u_g_ab: np.ndarray = field(default_factory=empty_array)
+
+    def __post_init__(self, t: np.ndarray, subsystem: LFilterLCLGrid) -> None:
+        """Compute output time series from the states."""
+        self.i_c_ab = np.array(subsystem._history.i_c_ab)
+        self.i_g_ab = np.array(subsystem._history.i_g_ab)
+        self.u_fg_ab = np.array(subsystem._history.u_fg_ab)
+
+    def compute_input_derived_signals(
+        self, t: np.ndarray, subsystem: LFilterLCLGrid
     ) -> None:
         """Process input time series."""
         self.u_g_ab = subsystem.pcc_voltage(self, self)
