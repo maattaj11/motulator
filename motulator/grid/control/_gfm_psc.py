@@ -8,6 +8,7 @@ from motulator.common.control._base import TimeSeries
 from motulator.common.utils._utils import wrap
 from motulator.grid.control._base import Measurements
 from motulator.grid.control._common import CurrentLimiter
+from motulator.grid.control._gfl_current_vector import PLL
 
 
 # %%
@@ -33,6 +34,7 @@ class Feedbacks:
     p_g: float = 0.0
     theta_c: float = 0.0  # Angle of the coordinate system (rad)
     w_c: float = 0.0  # Angular speed of the coordinate system (rad/s)
+    w_g: float = 0.0
 
 
 class PowerSynchronizationController:
@@ -71,24 +73,33 @@ class PowerSynchronizationController:
         u_nom: float,
         w_nom: float,
         i_max: float,
+        s_base: float,
         R: float = 0.0,
         R_a: float | None = None,
         w_b: float = 2 * pi * 5,
         T_s: float = 125e-6,
+        H: float = 5.0,
+        sigma: float = 0.05,
+        alpha_pll: float = 2 * pi * 20,
     ) -> None:
         self.theta_c: float = 0.0
         self.i_c_flt: complex = 0j
         self.current_limiter = CurrentLimiter(i_max)
+        self.pll = PLL(u_nom, w_nom, alpha_pll)
+        self.p_filt: float = 0.0
         self.w_nom = w_nom
         self.R = R
         self.w_b = w_b
         self.R_a = 0.25 * u_nom / i_max if R_a is None else R_a
         self.k_p_psc = w_nom * self.R_a / (1.5 * u_nom**2)
         self.T_s = T_s
+        self.M = 2 * s_base * H / w_nom
+        self.k_g = s_base / (sigma * w_nom)
 
     def get_feedback(self, u_c_ab: complex, meas: Measurements) -> Feedbacks:
         """Get the feedback signals."""
         out = Feedbacks(theta_c=self.theta_c)
+        self.pll_outputs = self.pll.compute_output(u_c_ab, meas.i_c_ab, meas.u_g_ab)
 
         # Transform the measured values into synchronous coordinates
         out.i_c = exp(-1j * out.theta_c) * meas.i_c_ab
@@ -97,6 +108,7 @@ class PowerSynchronizationController:
         # Other feedback signals
         p_loss = 1.5 * self.R * abs(out.i_c) ** 2
         out.p_g = 1.5 * (out.u_c * out.i_c.conjugate()).real - p_loss
+        out.w_g = self.pll_outputs.w_g
         return out
 
     def compute_output(
@@ -106,7 +118,12 @@ class PowerSynchronizationController:
         ref = References(T_s=self.T_s, v_c=v_c_ref, p_g=p_g_ref)
 
         # Power droop
-        fbk.w_c = ref.w_c = self.w_nom + self.k_p_psc * (ref.p_g - fbk.p_g)
+        w_droop = (
+            self.p_filt / self.k_g
+            if self.M != 0
+            else self.k_p_psc * (ref.p_g - fbk.p_g)
+        )
+        fbk.w_c = ref.w_c = self.w_nom + w_droop
 
         # Optionally, use of reference feedforward for d-axis current
         ref.i_c = ref.p_g / (1.5 * ref.v_c) + 1j * self.i_c_flt.imag
@@ -120,8 +137,13 @@ class PowerSynchronizationController:
     def update(self, ref: References, fbk: Feedbacks) -> None:
         """Update states."""
         self.i_c_flt += ref.T_s * self.w_b * (fbk.i_c - self.i_c_flt)
+        if self.M != 0:
+            self.p_filt += (
+                ref.T_s * self.k_g / self.M * (ref.p_g - fbk.p_g - self.p_filt)
+            )
         self.theta_c += ref.T_s * ref.w_c
         self.theta_c = wrap(self.theta_c)
+        self.pll.update(ref.T_s, self.pll_outputs)
 
     def post_process(self, ts: TimeSeries) -> None:
         """Post-process controller time series."""

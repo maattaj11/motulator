@@ -46,7 +46,7 @@ def _plot_powers(ax, ctrl, mdl, base: BaseValues) -> None:
     )
     ax.plot(mdl.t, p_g / base.p, label=r"$p_\mathrm{g}$")
 
-    if hasattr(ctrl.ref, "q_g") and np.any(ctrl.ref.q_g):
+    if hasattr(ctrl.ref, "q_g"):  # and np.any(ctrl.ref.q_g):
         ax.plot(
             ctrl.t,
             ctrl.ref.q_g / base.p,
@@ -86,6 +86,19 @@ def _plot_currents(ax, ctrl, base: BaseValues) -> None:
         label=r"$i_\mathrm{cq}$",
         ds="steps-post",
     )
+    # ax.plot(
+    #     ctrl.t,
+    #     np.abs(ctrl.fbk.i_c) / base.i,
+    #     label=r"$|i_\mathrm{c}|$",
+    #     ds="steps-post",
+    # )
+    # ax.plot(
+    #     ctrl.t,
+    #     np.full(np.size(ctrl.t), 1.3 * base.i) / base.i,
+    #     "--",
+    #     label=r"$i_\mathrm{max}$",
+    #     ds="steps-post",
+    # )
     ax.legend()
 
 
@@ -134,6 +147,84 @@ def _plot_voltages(ax, ctrl, mdl, base: BaseValues) -> None:
 
     _, ymax = ax.get_ylim()
     ax.set_ylim(0, ymax)
+    ax.legend()
+
+
+def _plot_pcc_voltages(ax, ctrl, mdl, base: BaseValues) -> None:
+    """Plot voltages."""
+    if hasattr(ctrl.fbk, "u_g_flt"):
+        ax.plot(
+            ctrl.t,
+            np.real(ctrl.fbk.u_g_flt) / base.u,
+            label=r"$\hat{u}_\mathrm{gd}$",
+            ds="steps-post",
+        )
+
+    if hasattr(ctrl.ref, "u_g"):
+        ax.plot(
+            ctrl.t,
+            np.real(ctrl.ref.u_g) / base.u,
+            "--",
+            label=r"$u_\mathrm{gd}^\mathrm{ref}$",
+            ds="steps-post",
+        )
+
+    if hasattr(ctrl.fbk, "u_g_flt"):
+        ax.plot(
+            ctrl.t,
+            np.imag(ctrl.fbk.u_g_flt) / base.u,
+            label=r"$\hat{u}_\mathrm{gq}$",
+            ds="steps-post",
+        )
+
+    if hasattr(ctrl.ref, "u_g"):
+        ax.plot(
+            ctrl.t,
+            np.imag(ctrl.ref.u_g) / base.u,
+            "--",
+            label=r"$u_\mathrm{gq}^\mathrm{ref}$",
+            ds="steps-post",
+        )
+
+    _, ymax = ax.get_ylim()
+    ax.set_ylim(0, ymax)
+    ax.legend()
+
+
+def _plot_freqs(ax, ctrl, mdl, base: BaseValues) -> None:
+    """Plot frequencies of converter output voltage and PCC voltage."""
+    # if base.w == 1:
+    #     ax.plot(
+    #         ctrl.t,
+    #         ctrl.fbk.w_c / (2 * np.pi),
+    #         "--",
+    #         label=r"$\omega_\mathrm{c}$",
+    #         ds="steps-post",
+    #     )
+    # else:
+    #     ax.plot(
+    #         ctrl.t,
+    #         ctrl.fbk.w_c / base.w,
+    #         "--",
+    #         label=r"$\omega_\mathrm{c}$",
+    #         ds="steps-post",
+    #     )
+
+    if hasattr(ctrl.fbk, "w_g"):
+        if base.w == 1:
+            ax.plot(
+                ctrl.t,
+                ctrl.fbk.w_g / (2 * np.pi),
+                label=r"$\omega_\mathrm{g}$",
+                ds="steps-post",
+            )
+        else:
+            ax.plot(
+                ctrl.t,
+                ctrl.fbk.w_g / base.w,
+                label=r"$\omega_\mathrm{g}$",
+                ds="steps-post",
+            )
     ax.legend()
 
 
@@ -190,13 +281,17 @@ def plot_control_signals(
         t_lims = (0, res.mdl.t[-1])
 
     # Create figure
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(width, height), sharex=True)
-    axes = [ax1, ax2, ax3]
+    # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(width, height), sharex=True)
+    # axes = [ax1, ax2, ax3]
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(width, height), sharex=True)
+    axes = [ax1, ax2, ax3, ax4]
 
     # Plot subplots
     _plot_powers(ax1, res.ctrl, res.mdl, base)
     _plot_currents(ax2, res.ctrl, base)
     _plot_voltages(ax3, res.ctrl, res.mdl, base)
+    # _plot_pcc_voltages(ax4, res.ctrl, res.mdl, base)
+    _plot_freqs(ax4, res.ctrl, res.mdl, base)
 
     # Configure all axes
     configure_axes(axes, t_lims, t_ticks, y_lims, y_ticks)
@@ -206,10 +301,12 @@ def plot_control_signals(
         ax1.set_ylabel("Power (p.u.)")
         ax2.set_ylabel("Current (p.u.)")
         ax3.set_ylabel("Voltage (p.u.)")
+        ax4.set_ylabel("Frequency (p.u.)")
     else:
         ax1.set_ylabel("Power (W)")
         ax2.set_ylabel("Current (A)")
         ax3.set_ylabel("Voltage (V)")
+        ax4.set_ylabel("Frequency (Hz)")
     fig.align_ylabels()
     axes[-1].set_xlabel("Time (s)")
 

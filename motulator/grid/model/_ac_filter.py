@@ -351,12 +351,20 @@ class LFilterLCLGrid(Subsystem):
     ----------
     L_f : float
         Filter inductance (H).
+    C_g : float
+        Grid capacitance (F).
+    L_g2 : float
+        Grid-side inductance (H).
     R_f : float, optional
         Series resistance (Ω) of the filter inductor, defaults to 0.
-    L_g : float, optional
-        Grid inductance (H), defaults to 0.
-    R_g : float, optional
-        Grid resistance (Ω), defaults to 0.
+    L_g1 : float, optional
+        Converter-side grid inductance (H), defaults to 0.
+    R_g1 : float, optional
+        Series resistance (Ω) of the converter-side grid inductance, defaults to 0.
+    R_g2 : float, optional
+        Series resistance (Ω) of the grid-side inductance, defaults to 0.
+    u_g0_ab : complex, optional
+        Initial value of the grid capacitor voltage (V), defaults to sqrt(2 / 3) * 400.
 
     """
 
@@ -364,16 +372,20 @@ class LFilterLCLGrid(Subsystem):
         self,
         L_f: float,
         C_g: float,
+        L_g2: float,
         R_f: float = 0.0,
-        L_g: float = 0.0,
-        R_g: float = 0.0,
+        L_g1: float = 0.0,
+        R_g1: float = 0.0,
+        R_g2: float = 0.0,
         u_g0_ab: complex = complex(sqrt(2 / 3) * 400),
     ) -> None:
         self.L_f = L_f
         self.C_g = C_g
         self.R_f = R_f
-        self.L_g = L_g
-        self.R_g = R_g
+        self.L_g1 = L_g1
+        self.L_g2 = L_g2
+        self.R_g1 = R_g1
+        self.R_g2 = R_g2
         # The following initial conditions are needed for computing the PCC voltage,
         # which has direct feedthrough. The PCC voltage is used only as a feedback
         # signal for the control system (but not coupled to the solution of the
@@ -388,10 +400,10 @@ class LFilterLCLGrid(Subsystem):
 
     def pcc_voltage(self, state: Any, inp: Any) -> Any:
         """Compute the voltage at the point of common coupling (PCC)."""
-        L_t = self.L_f + 0.5 * self.L_g
+        L_t = self.L_f + self.L_g1
         u_g_ab = (
-            0.5 * self.L_g * (inp.u_c_ab - self.R_f * state.i_c_ab)
-            + self.L_f * (state.u_fg_ab + 0.5 * self.R_g * state.i_c_ab)
+            self.L_g1 * (inp.u_c_ab - self.R_f * state.i_c_ab)
+            + self.L_f * (state.u_fg_ab + self.R_g1 * state.i_c_ab)
         ) / L_t
         return u_g_ab
 
@@ -405,14 +417,12 @@ class LFilterLCLGrid(Subsystem):
         state = self.state
         inp = self.inp
         # Total inductance and resistance
-        L_t = self.L_f + 0.5 * self.L_g
-        R_t = self.R_f + 0.5 * self.R_g
+        L_t = self.L_f + self.L_g1
+        R_t = self.R_f + self.R_g1
         # State equations
         d_i_c_ab = (inp.u_c_ab - state.u_fg_ab - R_t * state.i_c_ab) / L_t
         d_u_fg_ab = (state.i_c_ab - state.i_g_ab) / self.C_g
-        d_i_g_ab = (state.u_fg_ab - inp.e_g_ab - 0.5 * self.R_g * state.i_g_ab) / (
-            0.5 * self.L_g
-        )
+        d_i_g_ab = (state.u_fg_ab - inp.e_g_ab - self.R_g2 * state.i_g_ab) / (self.L_g2)
         return [d_i_c_ab, d_u_fg_ab, d_i_g_ab]
 
     def meas_currents(self) -> Any:

@@ -10,6 +10,7 @@ from motulator.common.control._base import TimeSeries
 from motulator.common.utils._utils import wrap
 from motulator.grid.control._base import Measurements
 from motulator.grid.control._common import CurrentLimiter
+from motulator.grid.control._gfl_current_vector import PLL
 
 
 # %%
@@ -33,6 +34,7 @@ class ObserverOutputs:
     q_g: float = 0.0
     theta_c: float = 0.0  # Angle of the coordinate system (rad)
     w_c: float = 0.0  # Angular speed of the coordinate system (rad/s)
+    w_g: float = 0.0
 
 
 class Observer:
@@ -153,6 +155,7 @@ class ObserverBasedGridFormingController:
         self,
         i_max: float,
         L: float,
+        s_base: float,
         R: float = 0.0,
         R_a: float | None = None,
         k_v: float | None = None,
@@ -161,18 +164,27 @@ class ObserverBasedGridFormingController:
         u_nom: float = sqrt(2 / 3) * 400,
         w_nom: float = 2 * pi * 50,
         T_s: float = 125e-6,
+        H: float = 0.0,
+        sigma: float = 0.05,
+        alpha_pll: float = 2 * pi * 20,
     ) -> None:
         self.observer = Observer(u_nom=u_nom, w_nom=w_nom, L=L, R=R, alpha_o=alpha_o)
         self.current_limiter = CurrentLimiter(i_max)
+        self.pll = PLL(u_nom, w_nom, alpha_pll)
+        self.p_filt: float = 0.0
         # Initialize gains
         self.R_a = 0.25 * u_nom / i_max if R_a is None else R_a
         self.k_v = alpha_o / w_nom if k_v is None else k_v
         self.k_c = alpha_c * L  # Current control gain
         self.T_s: float = T_s
+        self.M = 2 * s_base * H / w_nom
+        self.k_g = s_base / (sigma * w_nom)
 
     def get_feedback(self, u_c_ab: complex, meas: Measurements) -> ObserverOutputs:
         """Get the feedback signals."""
         fbk = self.observer.compute_output(u_c_ab, meas.i_c_ab)
+        self.pll_outputs = self.pll.compute_output(u_c_ab, meas.i_c_ab, meas.u_g_ab)
+        fbk.w_g = self.pll_outputs.w_g
         return fbk
 
     def compute_output(
@@ -187,7 +199,8 @@ class ObserverBasedGridFormingController:
         k_v = exp_j_theta * (1.0 - 1j * self.k_v)
 
         # Feedback correction for grid-forming mode
-        e_c = k_p * (ref.p_g - fbk.p_g) + k_v * (ref.v_c - abs(fbk.v_c))
+        p_e = self.p_filt if self.M != 0 else ref.p_g - fbk.p_g
+        e_c = k_p * p_e + k_v * (ref.v_c - abs(fbk.v_c))
 
         # Transparent current limitation
         ref.i_c = fbk.i_c + e_c / self.k_c
@@ -201,6 +214,11 @@ class ObserverBasedGridFormingController:
     def update(self, ref: References, fbk: ObserverOutputs) -> None:
         """Update states."""
         self.observer.update(ref.T_s, fbk)
+        if self.M != 0:
+            self.p_filt += (
+                ref.T_s * self.k_g / self.M * (ref.p_g - fbk.p_g - self.p_filt)
+            )
+        self.pll.update(ref.T_s, self.pll_outputs)
 
     def post_process(self, ts: TimeSeries) -> None:
         """Post-process controller time series."""

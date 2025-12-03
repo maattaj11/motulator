@@ -9,6 +9,7 @@ from motulator.grid.control._gfl_current_vector import (
 )
 from motulator.grid.control._gfm_observer import ObserverBasedGridFormingController
 from motulator.grid.control._gfm_psc import PowerSynchronizationController
+from motulator.grid.control._gfm_vsm import VirtualSynchronousMachineController
 
 __all__ = [
     "CurrentController",
@@ -19,4 +20,5 @@ __all__ = [
     "ObserverBasedGridFormingController",
     "PLL",
     "PowerSynchronizationController",
+    "VirtualSynchronousMachineController",
 ]
