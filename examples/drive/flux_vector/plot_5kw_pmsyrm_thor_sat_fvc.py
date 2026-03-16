@@ -37,7 +37,7 @@ base = utils.BaseValues.from_nominal(nom, n_p=2)
 
 # Get the path of the MATLAB file and load the FEM data
 p = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-fem_flux_map = utils.import_syre_data(str(p / "THOR.mat"))
+fem_flux_map = utils.import_syre_data(p / "thor.mat")
 
 # %%
 # Plot the maps in per-unit values.
@@ -78,7 +78,7 @@ mdl = model.Drive(machine, mechanics, converter)
 # Create the flux and current maps for the control system
 fem_curr_map = fem_flux_map.invert()
 est_par = control.SaturatedSynchronousMachinePars(
-    n_p=2, R_s=0.2, i_s_dq_fcn=fem_curr_map, psi_s_dq_fcn=fem_flux_map
+    n_p=2, R_s=0.2, psi_s_dq_fcn=fem_flux_map
 )
 # Since the inertia `J` is provided, the mechanical-model-based speed observer is used
 cfg = control.FluxVectorControllerCfg(i_s_max=2 * base.i, J=2 * 0.0042, alpha_i=0)

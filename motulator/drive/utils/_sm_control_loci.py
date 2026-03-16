@@ -11,6 +11,8 @@ from motulator.drive.utils._parameters import (
     SynchronousMachinePars,
 )
 
+NUM = 16
+
 
 # %%
 @dataclass
@@ -31,7 +33,7 @@ class MTPVLocus:
     i_s_dq: Any
     tau_M: Any
     tau_M_vs_psi_s_abs: Callable[[float], float]
-    psi_s_dq_vs_psi_s_abs: Callable[[float], complex]
+    i_s_dq_vs_psi_s_abs: Callable[[float], complex]
 
 
 @dataclass
@@ -51,8 +53,8 @@ class ControlLoci:
 
     This class computes optimal control loci for synchronous machines, including the
     maximum-torque-per-ampere (MTPA), maximum-torque-per-volt (MTPV), and current limit
-    loci [#Mor1994]_. The magnetic saturation is taken into account. The methods
-    can be used to precompute lookup tables for control and to analyze the machine
+    loci [#Mor1994]_. The magnetic saturation is taken into account. The methods can be
+    used to precompute lookup tables for control and to analyze the machine
     characteristics.
 
     Parameters
@@ -86,46 +88,23 @@ class ControlLoci:
         self.par = par
 
     def compute_mtpa_current_angle(self, i_s_abs: float) -> float:
-        """MTPA current angle (rad) for a given current magnitude."""
-        par = self.par
+        """MTPA current angle (rad) at given current magnitude (A)."""
 
         def mtpa_cond(gamma: float) -> float:
             i_s_dq = i_s_abs * np.exp(1j * gamma)
             psi_a_dq = self.par.aux_flux(i_s_dq)
             return np.real(psi_a_dq * np.conj(i_s_dq))
 
-        match par.kind:
-            case "rel":
-                gamma_range = (0, 0.5 * np.pi)
-            case "pm":
-                gamma_range = (0.5 * np.pi, np.pi)
+        if self.par.psi_f == 0:
+            gamma_range = (0, 0.5 * np.pi)
+        else:
+            gamma_range = (0.5 * np.pi, np.pi)
 
-        if mtpa_cond(gamma_range[0]) * mtpa_cond(gamma_range[1]) >= 0:
-            return 0.0
-        delta = root_scalar(mtpa_cond, bracket=gamma_range, method="brentq").root
-        return delta
+        if mtpa_cond(gamma_range[0]) * mtpa_cond(gamma_range[1]) > 0:
+            return 0.0  # No root in the range
+        return root_scalar(mtpa_cond, bracket=gamma_range, method="brentq").root
 
-    def compute_mtpv_flux_angle(self, psi_s_abs: float) -> float:
-        """MTPV flux angle (rad) for a given flux magnitude (Vs)."""
-        par = self.par
-
-        def mtpv_cond(delta: float) -> Any:
-            psi_s_dq = psi_s_abs * np.exp(1j * delta)
-            i_a_dq = par.aux_current(psi_s_dq)
-            return np.real(i_a_dq * np.conj(psi_s_dq))
-
-        match par.kind:
-            case "rel":
-                delta_range = (0, 0.5 * np.pi)
-            case "pm":
-                delta_range = (0.5 * np.pi, np.pi)
-
-        if mtpv_cond(delta_range[0]) * mtpv_cond(delta_range[1]) >= 0:
-            return 0.0
-        gamma = root_scalar(mtpv_cond, bracket=delta_range, method="brentq").root
-        return gamma
-
-    def compute_mtpa_locus(self, i_s_max: float, num: int = 16) -> MTPALocus:
+    def compute_mtpa_locus(self, i_s_max: float, num: int = NUM) -> MTPALocus:
         """
         Compute the MTPA locus.
 
@@ -134,7 +113,7 @@ class ControlLoci:
         i_s_max : float
             Maximum current magnitude (A) at which the locus is computed.
         num : int, optional
-            Amount of points, defaults to 16.
+            Number of points.
 
         Returns
         -------
@@ -146,8 +125,8 @@ class ControlLoci:
 
         # Calculate MTPA points iteratively for each current magnitude
         gamma = np.zeros_like(current_magnitudes)
-        for idx, i_s_mag in enumerate(current_magnitudes):
-            gamma[idx] = self.compute_mtpa_current_angle(float(i_s_mag))
+        for idx, i_s_abs in enumerate(current_magnitudes):
+            gamma[idx] = self.compute_mtpa_current_angle(float(i_s_abs))
 
         # MTPA locus expressed with different quantities
         i_s_dq = current_magnitudes * np.exp(1j * gamma)
@@ -161,16 +140,34 @@ class ControlLoci:
             i_s_dq_vs_tau_M=lambda x: np.interp(x, tau_M, i_s_dq),
         )
 
-    def compute_mtpv_locus(self, psi_s_max: float, num: int = 16) -> MTPVLocus:
+    def compute_mtpv_flux_angle(self, psi_s_abs: float) -> float:
+        """MTPV flux angle (rad) at given flux magnitude (Vs)."""
+
+        def mtpv_cond(delta: float) -> float:
+            psi_s_dq = psi_s_abs * np.exp(1j * delta)
+            i_s_dq = self.par.iterate_i_s_dq(psi_s_dq)
+            i_a_dq = self.par.aux_current(i_s_dq)
+            return np.real(i_a_dq * np.conj(psi_s_dq))
+
+        if self.par.psi_f == 0:
+            delta_range = (0, 0.5 * np.pi)
+        else:
+            delta_range = (0.5 * np.pi, np.pi)
+
+        if mtpv_cond(delta_range[0]) * mtpv_cond(delta_range[1]) > 0:
+            return np.nan  # No root in the range
+        return root_scalar(mtpv_cond, bracket=delta_range, method="brentq").root
+
+    def compute_mtpv_locus(self, psi_s_max: float, num: int = NUM) -> MTPVLocus:
         """
         Compute the MTPV locus.
 
         Parameters
         ----------
         psi_s_max : float
-            Maximum flux magnitude (Vs) at which the locus is computed.
+            Maximum flux linkage (Vs) at which the locus is computed.
         num : int, optional
-            Amount of points, defaults to 16.
+            Number of points.
 
         Returns
         -------
@@ -178,16 +175,15 @@ class ControlLoci:
             MTPV locus data.
 
         """
+        # Calculate MTPV points iteratively for each flux magnitude
         flux_magnitudes = np.linspace(0, psi_s_max, num)
-
-        # Calculate MTPV points iteratively for each current magnitude
         delta = np.zeros_like(flux_magnitudes)
         for idx, psi_s_abs in enumerate(flux_magnitudes):
             delta[idx] = self.compute_mtpv_flux_angle(float(psi_s_abs))
 
         # MTPV locus expressed with different quantities
         psi_s_dq = flux_magnitudes * np.exp(1j * delta)
-        i_s_dq = self.par.i_s_dq(psi_s_dq)
+        i_s_dq = np.array([self.par.iterate_i_s_dq(psi) for psi in psi_s_dq])
         tau_M = 1.5 * self.par.n_p * np.imag(i_s_dq * np.conj(psi_s_dq))
 
         return MTPVLocus(
@@ -195,14 +191,14 @@ class ControlLoci:
             i_s_dq=i_s_dq,
             tau_M=tau_M,
             tau_M_vs_psi_s_abs=lambda x: np.interp(x, abs(psi_s_dq), tau_M),
-            psi_s_dq_vs_psi_s_abs=lambda x: np.interp(x, abs(psi_s_dq), psi_s_dq),
+            i_s_dq_vs_psi_s_abs=lambda x: np.interp(x, abs(psi_s_dq), i_s_dq),
         )
 
     def compute_const_current_locus(
         self,
         i_s_max: float,
         gamma_range: tuple[Any, Any] = (np.pi, 0.5 * np.pi),
-        num: int = 16,
+        num: int = NUM,
     ) -> CurrentLimitLocus:
         """
         Compute the constant current locus.
@@ -214,7 +210,7 @@ class ControlLoci:
         gamma_range : tuple, optional
             Range of the current angle (electrical rad), defaults to (pi, pi/2).
         num : int, optional
-            Amount of points, defaults to 16.
+            Number of points.
 
         Returns
         -------
@@ -236,7 +232,7 @@ class ControlLoci:
             psi_s_dq=psi_s_dq,
             i_s_dq=i_s_dq,
             tau_M=tau_M,
-            i_s_dq_vs_psi_s_abs=lambda x: np.interp(x, np.abs(psi_s_dq), i_s_dq),
+            i_s_dq_vs_psi_s_abs=lambda x: np.interp(x, abs(psi_s_dq), i_s_dq),
         )
 
     def compute_mtpv_current(self, i_s_abs: float) -> complex:
@@ -254,22 +250,21 @@ class ControlLoci:
             MTPV current (A). If no MTPV exists, returns np.nan.
 
         """
-        par = self.par
 
-        def mtpv_cond(delta: float) -> Any:
-            i_s_dq = i_s_abs * np.exp(1j * delta)
+        def mtpv_cond(gamma: float) -> float:
+            i_s_dq = i_s_abs * np.exp(1j * gamma)
             psi_s_dq = self.par.psi_s_dq(i_s_dq)
-            i_a_dq = par.aux_current(psi_s_dq)
-            return np.real(i_a_dq * np.conj(psi_s_dq))
+            i_a_dq = self.par.aux_current(i_s_dq)
+            return float(np.real(i_a_dq * np.conj(psi_s_dq)))
 
-        match par.kind:
-            case "rel":
-                gamma_range = (0, 0.5 * np.pi)
-            case "pm":
-                gamma_range = (0.5 * np.pi, np.pi)
+        if self.par.psi_f == 0:
+            gamma_range = (0, 0.5 * np.pi)
+        else:
+            gamma_range = (0.5 * np.pi, np.pi)
 
         if mtpv_cond(gamma_range[0]) * mtpv_cond(gamma_range[1]) >= 0:
             return np.nan  # No MTPV for this current
+
         gamma = root_scalar(mtpv_cond, bracket=gamma_range, method="brentq").root
 
         return complex(i_s_abs * np.exp(1j * gamma))

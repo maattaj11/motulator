@@ -22,7 +22,6 @@ limited due to the comparatively large q-axis inductance.
 from pathlib import Path
 
 import numpy as np
-from scipy.io import loadmat
 
 import motulator.drive.control.sm as control
 from motulator.drive import model, utils
@@ -37,15 +36,15 @@ base = utils.BaseValues.from_nominal(nom, n_p=2)
 # Plot the saturation model (surfaces) and the measured flux map data (points). This
 # data is used to parametrize the machine model.
 
-# Load the measured data from the MATLAB file
+# Load the measured data
 p = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-meas_data = loadmat(p / "ABB_400rpm_map.mat")
+meas_data = np.load(p / "baldor_400rpm_map.npz")
+i_s_dq_map = meas_data["i_s_dq"]
+psi_s_dq_map = meas_data["psi_s_dq"]
 
 # Create the flux map from the measured data
 meas_flux_map = utils.MagneticModel(
-    i_s_dq=meas_data["id_map"] + 1j * meas_data["iq_map"],
-    psi_s_dq=meas_data["psid_map"] + 1j * meas_data["psiq_map"],
-    type="flux_map",
+    i_s_dq=i_s_dq_map, psi_s_dq=psi_s_dq_map, type="flux_map"
 )
 
 # Plot the measured data
@@ -55,7 +54,7 @@ utils.plot_flux_vs_current(meas_flux_map, base, x_lims=(-1.5, 1.5))
 # %%
 # Create a saturation model, which will be used in the control system.
 
-i_s_dq_fcn = utils.SaturationModelPMSyRM(
+est_current_map = utils.SaturationModelPMSyRM(
     a_d0=3.96,
     a_dd=28.5,
     S=4,
@@ -76,11 +75,11 @@ i_s_dq_fcn = utils.SaturationModelPMSyRM(
 # Compare the saturation model with the measured data.
 
 # Generate the flux map using the saturation model
-est_curr_map = i_s_dq_fcn.as_magnetic_model(
+est_current_map = est_current_map.as_magnetic_model(
     d_range=np.linspace(-0.1 * base.psi, base.psi, 256),
     q_range=np.linspace(-1.4 * base.psi, 1.4 * base.psi, 256),
 )
-est_flux_map = est_curr_map.invert()
+est_flux_map = est_current_map.invert()
 
 # Plot the saturation model (surface) and the measured data (points)
 utils.plot_map(
@@ -117,7 +116,7 @@ mdl = model.Drive(machine, mechanics, converter)
 # load-torque disturbance estimation provides integral action.
 
 est_par = control.SaturatedSynchronousMachinePars(
-    n_p=2, R_s=0.63, i_s_dq_fcn=est_curr_map, psi_s_dq_fcn=est_flux_map
+    n_p=2, R_s=0.63, psi_s_dq_fcn=est_flux_map
 )
 cfg = control.FluxVectorControllerCfg(
     i_s_max=2 * base.i, J=0.05, alpha_i=0, alpha_o=2 * np.pi * 8
@@ -125,7 +124,6 @@ cfg = control.FluxVectorControllerCfg(
 vector_ctrl = control.FluxVectorController(est_par, cfg, sensorless=True)
 speed_ctrl = control.SpeedController(J=0.05, alpha_s=2 * np.pi * 4)
 ctrl = control.VectorControlSystem(vector_ctrl, speed_ctrl)
-
 
 # %%
 # Visualize the control loci.
@@ -141,13 +139,13 @@ mc.plot_flux_loci(i_s_vals, base)
 # Set the speed reference and the external load torque.
 
 ctrl.set_speed_ref(lambda t: (t > 0.2) * 2 * base.w_M)
-mdl.mechanics.set_external_load_torque(lambda t: (t > 0.8) * 0.7 * nom.tau)
+mdl.mechanics.set_external_load_torque(lambda t: (t > 1.25) * 0.7 * nom.tau)
 
 # %%
 # Create the simulation object, simulate, and plot the results in per-unit values.
 
 sim = model.Simulation(mdl, ctrl)
-res = sim.simulate(t_stop=1.4)
+res = sim.simulate(t_stop=2)
 utils.plot(res, base)
 
 # %%
