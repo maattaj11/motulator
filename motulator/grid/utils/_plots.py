@@ -1,6 +1,7 @@
 """Example plotting scripts for grid converters."""
 
 from pathlib import Path
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,11 +32,26 @@ def _setup_plot(latex: bool) -> tuple[float, float]:
 
 
 # %%
-def _plot_powers(ax, ctrl, mdl, base: BaseValues) -> None:
+def _plot_powers(ax, ctrl, mdl, base: BaseValues, power_calc: Any) -> None:
     """Plot active and reactive powers."""
+
+    # Choose quantities to use for power calculation
+    if power_calc == "u_c":
+        u_ab = ctrl.fbk.u_c
+        i_ab = ctrl.fbk.i_c
+    elif power_calc == "u_f":
+        u_ab = mdl.ac_filter.u_f_ab
+        i_ab = mdl.ac_filter.i_c_ab
+    elif power_calc == "u_g":
+        u_ab = mdl.ac_filter.u_g_ab
+        i_ab = mdl.ac_filter.i_g_ab
+    else:
+        u_ab = mdl.ac_filter.e_g_ab
+        i_ab = mdl.ac_filter.i_g_ab
+
     # Calculate powers
-    p_g = 1.5 * np.real(mdl.ac_filter.e_g_ab * np.conj(mdl.ac_filter.i_g_ab))
-    q_g = 1.5 * np.imag(mdl.ac_filter.e_g_ab * np.conj(mdl.ac_filter.i_g_ab))
+    p_g = 1.5 * np.real(u_ab * np.conj(i_ab))
+    q_g = 1.5 * np.imag(u_ab * np.conj(i_ab))
 
     ax.plot(
         ctrl.t,
@@ -140,6 +156,7 @@ def _plot_voltages(ax, ctrl, mdl, base: BaseValues) -> None:
 def plot_control_signals(
     res: SimulationResults,
     base: BaseValues | None = None,
+    power_calc: Literal["e_g", "u_g", "u_f", "u_c"] = "e_g",
     t_lims: tuple[float, float] | None = None,
     t_ticks: ArrayLike | None = None,
     y_lims: list[tuple[float, float] | None] | None = None,
@@ -158,6 +175,12 @@ def plot_control_signals(
     base : BaseValues, optional
         Base values for scaling the waveforms. If not given, the waveforms are plotted
         in SI units.
+    power_calc : Literal['e_g', 'u_g', 'u_f', 'u_c'], optional
+        Choose the quantities for calculating powers, defaults to "re_im". Options are:
+        - "e_g": use grid voltage and grid current
+        - "u_g": use PCC voltage and grid current
+        - "u_f": use filter capacitor voltage and converter current
+        - "u_c": use realized converter voltage and converter current
     t_lims : tuple[float, float], optional
         Time axis limits. If None, uses full time range.
     t_ticks : ArrayLike, optional
@@ -194,7 +217,7 @@ def plot_control_signals(
     axes = [ax1, ax2, ax3]
 
     # Plot subplots
-    _plot_powers(ax1, res.ctrl, res.mdl, base)
+    _plot_powers(ax1, res.ctrl, res.mdl, base, power_calc)
     _plot_currents(ax2, res.ctrl, base)
     _plot_voltages(ax3, res.ctrl, res.mdl, base)
 
