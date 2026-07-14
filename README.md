@@ -3,7 +3,7 @@
 
 ## Information regarding this archived branch
 
-This branch is for purpose of archiving the identification method and version of *motulator* used in (link to publication, to be added). Example scripts demonstrating the usage of the identification method can be found in
+This branch is for purpose of archiving the identification method and version of *motulator* used in https://doi.org/10.48550/arXiv.2607.10653. Example scripts demonstrating the usage of the identification method can be found in
 ```
 examples/grid/identification/
 ```
